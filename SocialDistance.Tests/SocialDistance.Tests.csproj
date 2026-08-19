@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\AetherRange\Localization.cs" Link="Localization.cs" />
+    <Compile Include="..\AetherRange\SemVersion.cs" Link="SemVersion.cs" />
+    <Compile Include="..\AetherRange\UpdateModels.cs" Link="UpdateModels.cs" />
+    <Compile Include="..\AetherRange\GitHubReleaseClient.cs" Link="GitHubReleaseClient.cs" />
+    <Compile Include="..\AetherRange\UpdatePackageManager.cs" Link="UpdatePackageManager.cs" />
+    <Compile Include="..\AetherRange\PluginSettings.cs" Link="PluginSettings.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+</Project>
