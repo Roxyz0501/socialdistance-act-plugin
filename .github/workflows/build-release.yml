@@ -16,9 +16,9 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
       - name: Set up .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: 8.0.x
       - name: Download and verify official ACT reference
@@ -41,7 +41,7 @@ jobs:
           dotnet build .\SocialDistance.Tests\SocialDistance.Tests.csproj -c Release --configfile .\NuGet.Config
           .\SocialDistance.Tests\bin\Release\net48\SocialDistance.Tests.exe
       - name: Upload verified plugin DLL
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
           name: SocialDistance-build
           path: AetherRange/bin/Release/net48/SocialDistance.dll
@@ -55,9 +55,9 @@ jobs:
       contents: write
     steps:
       - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
       - name: Set up .NET
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           dotnet-version: 8.0.x
       - name: Validate tag and build release assets
