@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
@@ -68,24 +69,42 @@ namespace SocialDistance
         private readonly HttpClient client;
 
         public GitHubReleaseClient()
+            : this(new HttpClientHandler())
         {
-            client = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        }
+
+        internal GitHubReleaseClient(HttpMessageHandler handler)
+        {
+            client = new HttpClient(handler, true) { Timeout = TimeSpan.FromSeconds(12) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("SocialDistance-ACT-Plugin");
             client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         }
 
-        public async Task<UpdateCheckResult> CheckAsync(Version currentAssemblyVersion)
+        public async Task<UpdateCheckResult> CheckAsync(Version currentAssemblyVersion, CancellationToken cancellationToken)
         {
             var current = ToSemVersion(currentAssemblyVersion);
+            cancellationToken.ThrowIfCancellationRequested();
             if (!UpdateRepository.IsConfigured)
                 return new UpdateCheckResult { Kind = UpdateCheckKind.RepositoryMissing, CurrentVersion = current };
             try
             {
                 var url = "https://api.github.com/repos/" + UpdateRepository.Owner + "/" +
                           UpdateRepository.Name + "/releases/latest";
-                var json = await client.GetStringAsync(url).ConfigureAwait(false);
-                var release = GitHubReleaseParser.ParseStableRelease(json);
-                return Evaluate(currentAssemblyVersion, release);
+                using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+                using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead,
+                           cancellationToken).ConfigureAwait(false))
+                {
+                    response.EnsureSuccessStatusCode();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var release = GitHubReleaseParser.ParseStableRelease(json);
+                    return Evaluate(currentAssemblyVersion, release);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -129,3 +148,4 @@ namespace SocialDistance
         public void Dispose() => client.Dispose();
     }
 }
+

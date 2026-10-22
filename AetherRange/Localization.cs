@@ -50,7 +50,7 @@ namespace SocialDistance
             ["UpdateChecking"] = "Checking for updates...", ["UpdateUpToDate"] = "You are using the latest stable version.",
             ["UpdateAvailable"] = "A stable update is available: {0} → {1}", ["UpdateFailed"] = "Update check failed: {0}",
             ["UpdateDownloading"] = "Downloading and verifying the update...",
-            ["UpdatePrepared"] = "Update verified. Close ACT to apply it, then restart ACT.",
+            ["UpdatePrepared"] = "Verified DLL staged at:\r\n{0}\r\nClose ACT, manually replace SocialDistance.dll with this file, then restart ACT.",
             ["UpdatePrepareFailed"] = "Could not prepare the update: {0}", ["UpdateSkipped"] = "Version {0} was postponed.",
             ["NoReleaseNotes"] = "No release notes were provided.", ["NotChecked"] = "Not checked yet",
             ["InvalidAddress"] = "Invalid web address.", ["UnknownError"] = "Unknown error"
@@ -91,7 +91,7 @@ namespace SocialDistance
             ["LaterButton"] = "後で", ["RepositoryMissing"] = "更新元リポジトリが未設定です。公開前に正しいGitHub所有者とリポジトリ名を設定してください。",
             ["UpdateChecking"] = "更新を確認しています…", ["UpdateUpToDate"] = "最新の安定版を使用しています。",
             ["UpdateAvailable"] = "安定版の更新があります: {0} → {1}", ["UpdateFailed"] = "更新確認に失敗しました: {0}",
-            ["UpdateDownloading"] = "更新をダウンロードして検証しています…", ["UpdatePrepared"] = "更新を検証しました。ACTを終了すると適用されます。完了後にACTを再起動してください。",
+            ["UpdateDownloading"] = "更新をダウンロードして検証しています…", ["UpdatePrepared"] = "検証済みDLLを次の場所に準備しました:\r\n{0}\r\nACT終了後、既存のSocialDistance.dllをこのファイルで手動置換し、ACTを再起動してください。",
             ["UpdatePrepareFailed"] = "更新を準備できませんでした: {0}", ["UpdateSkipped"] = "バージョン {0} を後回しにしました。",
             ["NoReleaseNotes"] = "更新内容はありません。", ["NotChecked"] = "未確認", ["InvalidAddress"] = "Webアドレスが無効です。", ["UnknownError"] = "不明なエラー"
         };
@@ -120,7 +120,7 @@ namespace SocialDistance
             ["CheckNow"] = "立即检查", ["CurrentVersion"] = "当前版本", ["LatestVersion"] = "最新版本", ["ReleaseNotes"] = "更新内容",
             ["UpdateButton"] = "下载并准备更新", ["LaterButton"] = "稍后", ["RepositoryMissing"] = "尚未配置更新仓库。发布前请设置正确的GitHub所有者和仓库名。",
             ["UpdateChecking"] = "正在检查更新…", ["UpdateUpToDate"] = "当前已是最新稳定版。", ["UpdateAvailable"] = "发现稳定版更新：{0} → {1}",
-            ["UpdateFailed"] = "检查更新失败：{0}", ["UpdateDownloading"] = "正在下载并验证更新…", ["UpdatePrepared"] = "更新已验证。关闭ACT后将应用更新，然后请重新启动ACT。",
+            ["UpdateFailed"] = "检查更新失败：{0}", ["UpdateDownloading"] = "正在下载并验证更新…", ["UpdatePrepared"] = "已将验证通过的 DLL 暂存于：\r\n{0}\r\n关闭 ACT 后，请手动用此文件替换现有的 SocialDistance.dll，然后重新启动 ACT。",
             ["UpdatePrepareFailed"] = "无法准备更新：{0}", ["UpdateSkipped"] = "已暂缓版本 {0}。", ["NoReleaseNotes"] = "未提供更新内容。", ["NotChecked"] = "尚未检查",
             ["InvalidAddress"] = "网页地址无效。", ["UnknownError"] = "未知错误"
         };
@@ -149,7 +149,7 @@ namespace SocialDistance
             ["CheckNow"] = "지금 확인", ["CurrentVersion"] = "현재 버전", ["LatestVersion"] = "최신 버전", ["ReleaseNotes"] = "업데이트 내용",
             ["UpdateButton"] = "업데이트 다운로드 및 준비", ["LaterButton"] = "나중에", ["RepositoryMissing"] = "업데이트 저장소가 설정되지 않았습니다. 배포 전에 올바른 GitHub 소유자와 저장소를 설정하세요.",
             ["UpdateChecking"] = "업데이트 확인 중…", ["UpdateUpToDate"] = "최신 안정 버전을 사용 중입니다.", ["UpdateAvailable"] = "안정 버전 업데이트가 있습니다: {0} → {1}",
-            ["UpdateFailed"] = "업데이트 확인 실패: {0}", ["UpdateDownloading"] = "업데이트 다운로드 및 검증 중…", ["UpdatePrepared"] = "업데이트가 검증되었습니다. ACT를 종료하면 적용됩니다. 이후 ACT를 다시 시작하세요.",
+            ["UpdateFailed"] = "업데이트 확인 실패: {0}", ["UpdateDownloading"] = "업데이트 다운로드 및 검증 중…", ["UpdatePrepared"] = "검증된 DLL을 다음 위치에 준비했습니다:\r\n{0}\r\nACT를 종료한 뒤 기존 SocialDistance.dll을 이 파일로 직접 교체하고 ACT를 다시 시작하세요.",
             ["UpdatePrepareFailed"] = "업데이트 준비 실패: {0}", ["UpdateSkipped"] = "버전 {0}을(를) 나중으로 미뤘습니다.", ["NoReleaseNotes"] = "업데이트 내용이 없습니다.", ["NotChecked"] = "확인하지 않음",
             ["InvalidAddress"] = "웹 주소가 올바르지 않습니다.", ["UnknownError"] = "알 수 없는 오류"
         };
@@ -196,3 +196,4 @@ namespace SocialDistance
         }
     }
 }
+

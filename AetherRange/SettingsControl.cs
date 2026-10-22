@@ -304,14 +304,14 @@ namespace SocialDistance
             checkNowButton.Enabled = installUpdateButton.Enabled = laterButton.Enabled = false;
         }
 
-        public void ShowUpdatePrepared(bool success, string error)
+        public void ShowUpdatePrepared(bool success, string error, string stagedDllPath)
         {
             checkNowButton.Enabled = true;
             installUpdateButton.Enabled = !success;
             laterButton.Enabled = !success;
             updateStatus.ForeColor = success ? Color.FromArgb(17, 108, 75) : Color.FromArgb(176, 65, 56);
             updateStatus.Text = success
-                ? Localization.Text(CurrentLanguage, "UpdatePrepared")
+                ? Localization.Text(CurrentLanguage, "UpdatePrepared", stagedDllPath ?? "")
                 : Localization.Text(CurrentLanguage, "UpdatePrepareFailed",
                     string.IsNullOrWhiteSpace(error) ? Localization.Text(CurrentLanguage, "UnknownError") : error);
         }
@@ -902,3 +902,4 @@ namespace SocialDistance
         }
     }
 }
+

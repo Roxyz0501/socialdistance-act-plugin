@@ -8,6 +8,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SocialDistance
@@ -17,12 +18,13 @@ namespace SocialDistance
         public bool Success { get; set; }
         public string Error { get; set; }
         public string StagingDirectory { get; set; }
-        public string BackupPath { get; set; }
+        public string StagedPluginPath { get; set; }
     }
 
     internal sealed class UpdatePackageManager : IDisposable
     {
         private const long MaximumPackageBytes = 50L * 1024 * 1024;
+        private const long MaximumPluginBytes = 50L * 1024 * 1024;
         private readonly HttpClient client;
 
         public UpdatePackageManager()
@@ -34,17 +36,15 @@ namespace SocialDistance
             client.DefaultRequestHeaders.UserAgent.ParseAdd("SocialDistance-ACT-Plugin");
         }
 
-        public async Task<UpdatePreparationResult> PrepareAndScheduleAsync(
-            ReleaseInfo release, string pluginPath, int actProcessId)
+        public async Task<UpdatePreparationResult> PrepareAsync(
+            ReleaseInfo release, CancellationToken cancellationToken)
         {
+            string stage = null;
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (release == null || release.Version == null || !release.Version.IsStable)
                     throw new InvalidDataException("Release metadata is invalid.");
-                var fullPluginPath = Path.GetFullPath(pluginPath);
-                if (!string.Equals(Path.GetFileName(fullPluginPath), "SocialDistance.dll",
-                        StringComparison.OrdinalIgnoreCase) || !File.Exists(fullPluginPath))
-                    throw new InvalidDataException("The loaded plugin path is invalid.");
 
                 var version = release.Version.ToString();
                 var expectedNames = new[]
@@ -64,33 +64,38 @@ namespace SocialDistance
                 var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "SocialDistance", "Updates");
                 Directory.CreateDirectory(root);
-                var stage = Path.Combine(root, version + "-" + Guid.NewGuid().ToString("N"));
+                stage = Path.Combine(root, version + "-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(stage);
                 var packagePath = Path.Combine(stage, package.Name);
                 var checksumPath = Path.Combine(stage, checksum.Name);
-                await DownloadAsync(package.DownloadUrl, packagePath, MaximumPackageBytes).ConfigureAwait(false);
-                await DownloadAsync(checksum.DownloadUrl, checksumPath, 1024 * 1024).ConfigureAwait(false);
+                await DownloadAsync(package.DownloadUrl, packagePath, MaximumPackageBytes, cancellationToken).ConfigureAwait(false);
+                await DownloadAsync(checksum.DownloadUrl, checksumPath, 1024 * 1024, cancellationToken).ConfigureAwait(false);
 
+                cancellationToken.ThrowIfCancellationRequested();
                 var expectedHash = ParseChecksum(File.ReadAllText(checksumPath, Encoding.UTF8), package.Name);
                 if (!VerifySha256(packagePath, expectedHash))
                     throw new InvalidDataException("Package SHA-256 verification failed.");
 
                 var stagedDll = Path.Combine(stage, "SocialDistance.dll");
-                ExtractValidatedPlugin(packagePath, stagedDll);
+                await ExtractValidatedPluginAsync(packagePath, stagedDll, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 ValidatePluginAssembly(stagedDll, release.Version);
-                var stagedHash = ComputeSha256(stagedDll);
-                var backupPath = fullPluginPath + ".backup-" +
-                                 FileVersionInfo.GetVersionInfo(fullPluginPath).FileVersion;
-                LaunchUpdater(actProcessId, stagedDll, fullPluginPath, backupPath, stagedHash, stage);
+                cancellationToken.ThrowIfCancellationRequested();
                 return new UpdatePreparationResult
                 {
                     Success = true,
                     StagingDirectory = stage,
-                    BackupPath = backupPath
+                    StagedPluginPath = stagedDll
                 };
+            }
+            catch (OperationCanceledException)
+            {
+                TryDeleteStage(stage);
+                throw;
             }
             catch (Exception ex)
             {
+                TryDeleteStage(stage);
                 return new UpdatePreparationResult { Success = false, Error = ex.GetBaseException().Message };
             }
         }
@@ -136,15 +141,18 @@ namespace SocialDistance
             throw new InvalidDataException("The SHA-256 manifest does not contain the package.");
         }
 
-        private async Task DownloadAsync(string url, string destination, long maximumBytes)
+        private async Task DownloadAsync(string url, string destination, long maximumBytes,
+            CancellationToken cancellationToken)
         {
             Uri uri;
             if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || !IsAllowedGitHubUri(uri))
                 throw new InvalidDataException("Release asset URL is not an allowed GitHub HTTPS URL.");
             for (var redirects = 0; redirects <= 5; redirects++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 using (var request = new HttpRequestMessage(HttpMethod.Get, uri))
-                using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
+                using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+                           cancellationToken)
                            .ConfigureAwait(false))
                 {
                     if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
@@ -167,11 +175,12 @@ namespace SocialDistance
                         var buffer = new byte[81920];
                         long total = 0;
                         int read;
-                        while ((read = await input.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+                        while ((read = await input.ReadAsync(buffer, 0, buffer.Length, cancellationToken)
+                                   .ConfigureAwait(false)) > 0)
                         {
                             total += read;
                             if (total > maximumBytes) throw new InvalidDataException("Downloaded file is too large.");
-                            await output.WriteAsync(buffer, 0, read).ConfigureAwait(false);
+                            await output.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
                         }
                     }
                     return;
@@ -189,20 +198,24 @@ namespace SocialDistance
                    host == "release-assets.githubusercontent.com";
         }
 
-        private static void ExtractValidatedPlugin(string packagePath, string destination)
+        private static async Task ExtractValidatedPluginAsync(string packagePath, string destination,
+            CancellationToken cancellationToken)
         {
             using (var archive = ZipFile.OpenRead(packagePath))
             {
                 foreach (var entry in archive.Entries)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!IsSafeZipEntry(entry.FullName))
                         throw new InvalidDataException("Unsafe ZIP entry: " + entry.FullName);
+                }
                 var candidates = archive.Entries.Where(x =>
                     string.Equals(Path.GetFileName(x.FullName), "SocialDistance.dll",
-                        StringComparison.OrdinalIgnoreCase) && x.Length > 0).ToList();
+                        StringComparison.OrdinalIgnoreCase) && x.Length > 0 && x.Length <= MaximumPluginBytes).ToList();
                 if (candidates.Count != 1) throw new InvalidDataException("Package must contain exactly one SocialDistance.dll.");
                 using (var input = candidates[0].Open())
                 using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    input.CopyTo(output);
+                    await input.CopyToAsync(output, 81920, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -221,34 +234,21 @@ namespace SocialDistance
                 throw new InvalidDataException("Package author metadata is invalid.");
         }
 
-        private static void LaunchUpdater(int processId, string source, string target, string backup,
-            string expectedHash, string stage)
+        private static void TryDeleteStage(string stage)
         {
-            var resultPath = Path.Combine(stage, "update-result.txt");
-            var script = "$ErrorActionPreference='Stop';" +
-                         "$src=" + Ps(source) + ";$dst=" + Ps(target) + ";$bak=" + Ps(backup) +
-                         ";$expected=" + Ps(expectedHash) + ";$result=" + Ps(resultPath) + ";" +
-                         "Wait-Process -Id " + processId + " -ErrorAction SilentlyContinue;" +
-                         "try{if((Get-FileHash -Algorithm SHA256 -LiteralPath $src).Hash.ToLowerInvariant() -ne $expected){throw 'Staged hash mismatch'};" +
-                         "Copy-Item -LiteralPath $dst -Destination $bak -Force;" +
-                         "try{Copy-Item -LiteralPath $src -Destination $dst -Force;" +
-                         "if((Get-FileHash -Algorithm SHA256 -LiteralPath $dst).Hash.ToLowerInvariant() -ne $expected){throw 'Installed hash mismatch'}}" +
-                         "catch{Copy-Item -LiteralPath $bak -Destination $dst -Force;throw};" +
-                         "Set-Content -LiteralPath $result -Value 'success' -Encoding UTF8}" +
-                         "catch{if((Test-Path -LiteralPath $bak) -and !(Test-Path -LiteralPath $dst)){Copy-Item -LiteralPath $bak -Destination $dst -Force};" +
-                         "Set-Content -LiteralPath $result -Value ('failed: '+$_.Exception.Message) -Encoding UTF8;exit 1}";
-            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-            Process.Start(new ProcessStartInfo
+            if (string.IsNullOrWhiteSpace(stage)) return;
+            try
             {
-                FileName = "powershell.exe",
-                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            });
+                if (Directory.Exists(stage))
+                    Directory.Delete(stage, true);
+            }
+            catch
+            {
+                // A leftover staged package has no process or retry scheduled after return.
+            }
         }
 
-        private static string Ps(string value) => "'" + value.Replace("'", "''") + "'";
         public void Dispose() => client.Dispose();
     }
 }
+

@@ -12,6 +12,7 @@
     <Compile Include="..\AetherRange\GitHubReleaseClient.cs" Link="GitHubReleaseClient.cs" />
     <Compile Include="..\AetherRange\UpdatePackageManager.cs" Link="UpdatePackageManager.cs" />
     <Compile Include="..\AetherRange\PluginSettings.cs" Link="PluginSettings.cs" />
+    <Compile Include="..\AetherRange\SettingsPersistenceCoordinator.cs" Link="SettingsPersistenceCoordinator.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.IO.Compression" />
@@ -21,3 +22,4 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
 </Project>
+

@@ -42,13 +42,24 @@ namespace SocialDistance
 
         public static PluginSettings Load(string path)
         {
+            bool loaded;
+            return Load(path, out loaded);
+        }
+
+        public static PluginSettings Load(string path, out bool loaded)
+        {
+            loaded = false;
             try
             {
                 if (!File.Exists(path))
                     return new PluginSettings();
 
                 using (var stream = File.OpenRead(path))
-                    return (PluginSettings)new XmlSerializer(typeof(PluginSettings)).Deserialize(stream);
+                {
+                    var result = (PluginSettings)new XmlSerializer(typeof(PluginSettings)).Deserialize(stream);
+                    loaded = result != null;
+                    return result ?? new PluginSettings();
+                }
             }
             catch
             {
@@ -58,12 +69,8 @@ namespace SocialDistance
 
         public void Save(string path)
         {
-            var directory = Path.GetDirectoryName(path);
-            if (!Directory.Exists(directory))
-                Directory.CreateDirectory(directory);
-
-            using (var stream = File.Create(path))
-                new XmlSerializer(typeof(PluginSettings)).Serialize(stream, this);
+            SettingsPersistenceCoordinator.AtomicWrite(path, SettingsPersistenceCoordinator.Serialize(this));
         }
     }
 }
+

@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SocialDistance
@@ -16,13 +18,18 @@ namespace SocialDistance
         private WarningOverlayForm warningOverlay;
         private FfxivDataSource dataSource;
         private PluginSettings settings;
-        private Timer refreshTimer;
+        private System.Windows.Forms.Timer refreshTimer;
+        private System.Windows.Forms.Timer settingsSaveTimer;
         private string settingsPath;
-        private DateTime lastPositionSave = DateTime.MinValue;
+        private SettingsPersistenceCoordinator settingsPersistence;
         private GitHubReleaseClient releaseClient;
         private UpdatePackageManager updatePackageManager;
         private UpdateCheckResult lastUpdateResult;
         private bool updateCheckRunning;
+        private bool updateInstallRunning;
+        private volatile bool acceptingWork;
+        private CancellationTokenSource lifecycleCancellation;
+        private Task activeUpdateTask = Task.CompletedTask;
 
         public void InitPlugin(TabPage pluginScreenSpace, Label pluginStatusText)
         {
@@ -35,12 +42,18 @@ namespace SocialDistance
             var legacySettingsPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "Advanced Combat Tracker", "Config", "AetherRange.config.xml");
-            settings = PluginSettings.Load(File.Exists(settingsPath) ? settingsPath : legacySettingsPath);
-            var languageWasUnset = string.IsNullOrWhiteSpace(settings.Language);
+            var currentSettingsExist = File.Exists(settingsPath);
+            var loadPath = currentSettingsExist ? settingsPath : legacySettingsPath;
+            bool settingsLoaded;
+            settings = PluginSettings.Load(loadPath, out settingsLoaded);
+            settingsPersistence = new SettingsPersistenceCoordinator(
+                settingsPath, settings, currentSettingsExist && settingsLoaded, DateTime.UtcNow);
             settings.Language = Localization.ResolveInitialLanguage(
                 settings.Language, CultureInfo.CurrentUICulture.Name);
             if (settings.EchoToggleText == "AetherRange")
                 settings.EchoToggleText = "SocialDistance";
+            acceptingWork = true;
+            lifecycleCancellation = new CancellationTokenSource();
             dataSource = new FfxivDataSource();
 
             settingsControl = new SettingsControl(settings);
@@ -87,15 +100,19 @@ namespace SocialDistance
             warningOverlay.SetOpacityPercent(settings.OpacityPercent);
             warningOverlay.BoundsChangedByUser += OnWarningOverlayBoundsChanged;
 
-            refreshTimer = new Timer { Interval = 125 };
+            refreshTimer = new System.Windows.Forms.Timer { Interval = 125 };
             refreshTimer.Tick += OnRefresh;
             refreshTimer.Start();
+            settingsSaveTimer = new System.Windows.Forms.Timer
+            {
+                Interval = (int)SettingsPersistenceCoordinator.DefaultInterval.TotalMilliseconds
+            };
+            settingsSaveTimer.Tick += OnSettingsSaveTick;
+            settingsSaveTimer.Start();
             ActGlobals.oFormActMain.OnLogLineRead += OnLogLineRead;
 
             ApplyVisibility();
             actStatusLabel.Text = Localization.Text(settings.Language, "Started");
-            if (languageWasUnset)
-                SaveSettings();
             settingsControl.ShowUpdateResult(null);
             if (settings.CheckUpdatesOnStartup)
                 BeginUpdateCheck(false);
@@ -103,6 +120,10 @@ namespace SocialDistance
 
         public void DeInitPlugin()
         {
+            if (!acceptingWork)
+                return;
+            acceptingWork = false;
+
             ActGlobals.oFormActMain.OnLogLineRead -= OnLogLineRead;
             if (refreshTimer != null)
             {
@@ -112,7 +133,41 @@ namespace SocialDistance
                 refreshTimer = null;
             }
 
-            SaveSettings();
+            if (settingsSaveTimer != null)
+            {
+                settingsSaveTimer.Stop();
+                settingsSaveTimer.Tick -= OnSettingsSaveTick;
+                settingsSaveTimer.Dispose();
+                settingsSaveTimer = null;
+            }
+
+            if (settingsControl != null)
+            {
+                settingsControl.SettingsChanged -= OnSettingsChanged;
+                settingsControl.UpdateCheckRequested -= OnUpdateCheckRequested;
+                settingsControl.UpdateInstallRequested -= OnUpdateInstallRequested;
+                settingsControl.UpdateLaterRequested -= OnUpdateLaterRequested;
+            }
+
+            // Both update paths use ConfigureAwait(false) and post UI work without waiting,
+            // so waiting here on ACT's UI thread cannot deadlock.
+            lifecycleCancellation?.Cancel();
+            try
+            {
+                activeUpdateTask?.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                SetStatus(Localization.Text(settings?.Language, "UpdatePrepareFailed", ex.GetBaseException().Message));
+            }
+
+            var finalSave = settingsPersistence?.Flush(settings, DateTime.UtcNow);
+            if (finalSave != null && finalSave.State == SettingsSaveState.Failed)
+                SetStatus(Localization.Text(settings?.Language, "SaveFailed",
+                    finalSave.Error == null ? Localization.Text(settings?.Language, "UnknownError") : finalSave.Error.Message));
 
             if (overlay != null)
             {
@@ -130,25 +185,24 @@ namespace SocialDistance
                 warningOverlay = null;
             }
 
-            if (settingsControl != null)
-            {
-                settingsControl.SettingsChanged -= OnSettingsChanged;
-                settingsControl.UpdateCheckRequested -= OnUpdateCheckRequested;
-                settingsControl.UpdateInstallRequested -= OnUpdateInstallRequested;
-                settingsControl.UpdateLaterRequested -= OnUpdateLaterRequested;
-            }
-
             releaseClient?.Dispose();
             releaseClient = null;
             updatePackageManager?.Dispose();
             updatePackageManager = null;
+            lifecycleCancellation?.Dispose();
+            lifecycleCancellation = null;
 
             if (actStatusLabel != null)
-                actStatusLabel.Text = Localization.Text(settings?.Language, "Stopped");
+            {
+                if (finalSave == null || finalSave.State != SettingsSaveState.Failed)
+                    actStatusLabel.Text = Localization.Text(settings?.Language, "Stopped");
+            }
         }
 
         private void OnRefresh(object sender, EventArgs e)
         {
+            if (!acceptingWork)
+                return;
             if (!settings.OverlayEnabled)
             {
                 HideOverlay();
@@ -198,12 +252,21 @@ namespace SocialDistance
             warningOverlay.Language = settings.Language;
             settingsControl.ShowUpdateResult(lastUpdateResult);
             ApplyVisibility();
-            SaveSettings();
+        }
+
+        private void OnSettingsSaveTick(object sender, EventArgs e)
+        {
+            if (!acceptingWork || settingsPersistence == null || settings == null)
+                return;
+            var result = settingsPersistence.Poll(settings, DateTime.UtcNow);
+            if (result.State == SettingsSaveState.Failed)
+                SetStatus(Localization.Text(settings.Language, "SaveFailed",
+                    result.Error == null ? Localization.Text(settings.Language, "UnknownError") : result.Error.Message));
         }
 
         private void OnLogLineRead(bool isImport, LogLineEventArgs logInfo)
         {
-            if (isImport || settings == null || logInfo == null)
+            if (!acceptingWork || isImport || settings == null || logInfo == null)
                 return;
 
             if (settings.EchoToggleEnabled && !string.IsNullOrWhiteSpace(settings.EchoToggleText))
@@ -235,9 +298,21 @@ namespace SocialDistance
 
         private void InvokeOnUiThread(Action action)
         {
-            if (settingsControl != null && settingsControl.InvokeRequired)
+            if (!acceptingWork || settingsControl == null || settingsControl.IsDisposed || !settingsControl.IsHandleCreated)
+                return;
+            if (settingsControl.InvokeRequired)
             {
-                settingsControl.BeginInvoke(action);
+                try
+                {
+                    settingsControl.BeginInvoke((Action)delegate
+                    {
+                        if (acceptingWork)
+                            action();
+                    });
+                }
+                catch (ObjectDisposedException)
+                {
+                }
                 return;
             }
             action();
@@ -256,14 +331,14 @@ namespace SocialDistance
 
         private void ToggleOverlayFromEcho()
         {
-            if (settings == null)
+            if (!acceptingWork || settings == null)
                 return;
             SetOverlayEnabled(!settings.OverlayEnabled, "SourceEcho");
         }
 
         private void SetOverlayEnabled(bool enabled, string sourceKey)
         {
-            if (settings == null)
+            if (!acceptingWork || settings == null)
                 return;
             if (settings.OverlayEnabled == enabled)
                 return;
@@ -271,7 +346,6 @@ namespace SocialDistance
             settings.OverlayEnabled = enabled;
             settingsControl?.SetOverlayEnabled(settings.OverlayEnabled);
             ApplyVisibility();
-            SaveSettings();
             if (actStatusLabel != null)
                 actStatusLabel.Text = Localization.Text(settings.Language, "OverlayChanged",
                     Localization.Text(settings.Language, settings.OverlayEnabled ? "Enabled" : "Disabled"),
@@ -280,7 +354,7 @@ namespace SocialDistance
 
         private void OnOverlayBoundsChanged(object sender, EventArgs e)
         {
-            if (overlay == null || settings == null || settings.OverlayLocked)
+            if (!acceptingWork || overlay == null || settings == null || settings.OverlayLocked)
                 return;
 
             settings.OverlayX = overlay.Left;
@@ -288,16 +362,11 @@ namespace SocialDistance
             settings.OverlayWidth = overlay.ClientSize.Width;
             settings.OverlayHeight = overlay.ClientSize.Height;
 
-            if ((DateTime.UtcNow - lastPositionSave).TotalMilliseconds >= 500)
-            {
-                SaveSettings();
-                lastPositionSave = DateTime.UtcNow;
-            }
         }
 
         private void OnWarningOverlayBoundsChanged(object sender, EventArgs e)
         {
-            if (warningOverlay == null || settings == null || settings.OverlayLocked)
+            if (!acceptingWork || warningOverlay == null || settings == null || settings.OverlayLocked)
                 return;
 
             settings.WarningOverlayX = warningOverlay.Left;
@@ -305,11 +374,6 @@ namespace SocialDistance
             settings.WarningOverlayWidth = warningOverlay.ClientSize.Width;
             settings.WarningOverlayHeight = warningOverlay.ClientSize.Height;
 
-            if ((DateTime.UtcNow - lastPositionSave).TotalMilliseconds >= 500)
-            {
-                SaveSettings();
-                lastPositionSave = DateTime.UtcNow;
-            }
         }
 
         private void ApplyVisibility()
@@ -365,19 +429,42 @@ namespace SocialDistance
             BeginUpdateCheck(true);
         }
 
-        private async void BeginUpdateCheck(bool manual)
+        private void BeginUpdateCheck(bool manual)
         {
-            if (updateCheckRunning || releaseClient == null || settingsControl == null)
+            if (!acceptingWork || updateCheckRunning || updateInstallRunning || releaseClient == null || settingsControl == null)
                 return;
             updateCheckRunning = true;
             settingsControl.ShowUpdateChecking();
-            var result = await releaseClient.CheckAsync(
-                Assembly.GetExecutingAssembly().GetName().Version);
-            updateCheckRunning = false;
-            lastUpdateResult = result;
-            settings.LastUpdateCheckUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
-            InvokeOnUiThread(delegate
+            var token = lifecycleCancellation.Token;
+            activeUpdateTask = RunUpdateCheckAsync(manual, token);
+        }
+
+        private async Task RunUpdateCheckAsync(bool manual, CancellationToken cancellationToken)
+        {
+            UpdateCheckResult result;
+            try
             {
+                result = await releaseClient.CheckAsync(
+                    Assembly.GetExecutingAssembly().GetName().Version, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                result = new UpdateCheckResult
+                {
+                    Kind = UpdateCheckKind.Failed,
+                    Error = ex.GetBaseException().Message
+                };
+            }
+
+            PostToUi(delegate
+            {
+                updateCheckRunning = false;
+                lastUpdateResult = result;
+                settings.LastUpdateCheckUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
                 if (result.Kind == UpdateCheckKind.Available && !manual &&
                     string.Equals(settings.SkippedUpdateVersion, result.Release.Version.ToString(),
                         StringComparison.OrdinalIgnoreCase))
@@ -391,58 +478,89 @@ namespace SocialDistance
                     if (result.Kind == UpdateCheckKind.Available)
                     {
                         settingsControl.FocusUpdateTab();
-                        if (actStatusLabel != null)
-                            actStatusLabel.Text = Localization.Text(settings.Language, "UpdateAvailable",
-                                result.CurrentVersion, result.Release.Version);
+                        SetStatus(Localization.Text(settings.Language, "UpdateAvailable",
+                            result.CurrentVersion, result.Release.Version));
                     }
                 }
-                SaveSettings();
             });
         }
 
-        private async void OnUpdateInstallRequested(object sender, EventArgs e)
+        private void OnUpdateInstallRequested(object sender, EventArgs e)
         {
-            if (lastUpdateResult == null || lastUpdateResult.Kind != UpdateCheckKind.Available ||
+            if (!acceptingWork || updateCheckRunning || updateInstallRunning || lastUpdateResult == null || lastUpdateResult.Kind != UpdateCheckKind.Available ||
                 lastUpdateResult.Release == null || updatePackageManager == null)
                 return;
             settingsControl.ShowUpdatePreparing();
-            var result = await updatePackageManager.PrepareAndScheduleAsync(
-                lastUpdateResult.Release,
-                Assembly.GetExecutingAssembly().Location,
-                Process.GetCurrentProcess().Id);
-            InvokeOnUiThread(delegate
+            updateInstallRunning = true;
+            var token = lifecycleCancellation.Token;
+            activeUpdateTask = RunUpdatePreparationAsync(lastUpdateResult.Release, token);
+        }
+
+        private async Task RunUpdatePreparationAsync(ReleaseInfo release, CancellationToken cancellationToken)
+        {
+            UpdatePreparationResult result;
+            try
             {
-                settingsControl.ShowUpdatePrepared(result.Success, result.Error);
-                if (actStatusLabel != null)
-                    actStatusLabel.Text = result.Success
-                        ? Localization.Text(settings.Language, "UpdatePrepared")
-                        : Localization.Text(settings.Language, "UpdatePrepareFailed",
-                            string.IsNullOrWhiteSpace(result.Error)
-                                ? Localization.Text(settings.Language, "UnknownError")
-                                : result.Error);
+                result = await updatePackageManager.PrepareAsync(release, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                result = new UpdatePreparationResult { Error = ex.GetBaseException().Message };
+            }
+
+            PostToUi(delegate
+            {
+                updateInstallRunning = false;
+                settingsControl.ShowUpdatePrepared(result.Success, result.Error, result.StagedPluginPath);
+                SetStatus(result.Success
+                    ? Localization.Text(settings.Language, "UpdatePrepared", result.StagedPluginPath)
+                    : Localization.Text(settings.Language, "UpdatePrepareFailed",
+                        string.IsNullOrWhiteSpace(result.Error)
+                            ? Localization.Text(settings.Language, "UnknownError")
+                            : result.Error));
             });
         }
 
         private void OnUpdateLaterRequested(object sender, EventArgs e)
         {
-            if (lastUpdateResult?.Release?.Version == null)
+            if (!acceptingWork || lastUpdateResult?.Release?.Version == null)
                 return;
             settings.SkippedUpdateVersion = lastUpdateResult.Release.Version.ToString();
             settingsControl.ShowUpdateSkipped(settings.SkippedUpdateVersion);
-            SaveSettings();
         }
 
-        private void SaveSettings()
+        private void PostToUi(Action action)
         {
-            try
+            if (!acceptingWork || settingsControl == null || settingsControl.IsDisposed || !settingsControl.IsHandleCreated)
+                return;
+            if (settingsControl.InvokeRequired)
             {
-                settings?.Save(settingsPath);
+                try
+                {
+                    settingsControl.BeginInvoke((Action)delegate
+                    {
+                        if (acceptingWork)
+                            action();
+                    });
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                return;
             }
-            catch (Exception ex)
-            {
-                if (actStatusLabel != null)
-                    actStatusLabel.Text = Localization.Text(settings?.Language, "SaveFailed", ex.Message);
-            }
+            if (acceptingWork)
+                action();
+        }
+
+        private void SetStatus(string message)
+        {
+            if (actStatusLabel != null && !actStatusLabel.IsDisposed)
+                actStatusLabel.Text = message;
         }
     }
 }
+
