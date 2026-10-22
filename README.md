@@ -83,15 +83,15 @@ FFXIV_ACT_PluginはSocialDistanceより先にロードしてください。接�
 AssemblyInfoのバージョンを更新後、次を実行します。
 
 ~~~powershell
-.\release.ps1 -Version 2.5.0
+.\release.ps1 -Version 2.5.1
 ~~~
 
-releaseフォルダへSocialDistance-v2.5.0.zipとSocialDistance-v2.5.0.zip.sha256が生成されます。タグはv2.5.0のようなSemVerにし、draft／prereleaseではないGitHub Releaseへ両方を添付します。
+releaseフォルダへSocialDistance-v2.5.1.zipとSocialDistance-v2.5.1.zip.sha256が生成されます。タグはv2.5.1のようなSemVerにし、draft／prereleaseではないGitHub Releaseへ両方を添付します。
 
 GitHub CLIを使用する例:
 
 ~~~powershell
-gh release create v2.5.0 .\release\SocialDistance-v2.5.0.zip .\release\SocialDistance-v2.5.0.zip.sha256 --title "SocialDistance v2.5.0" --notes-file .\RELEASE_NOTES.md
+gh release create v2.5.1 .\release\SocialDistance-v2.5.1.zip .\release\SocialDistance-v2.5.1.zip.sha256 --title "SocialDistance v2.5.1" --notes-file .\RELEASE_NOTES.md
 ~~~
 
 通常は `vMAJOR.MINOR.PATCH` タグをmainへpushすると、GitHub ActionsがWindows上で公式ACT ZIPを取得し、署名済みACTアセンブリの公開鍵トークンを検証してからビルドとテストを行います。成功時だけ同じ名前のZIPとSHA-256マニフェストを添付した安定版Releaseを作成します。ACT本体はRelease assetへ含めません。
@@ -123,3 +123,4 @@ ACTを標準以外の場所へインストールしている場合:
 ## 注意
 
 ACTを含む外部ツールの利用は自己責任です。ゲーム内で取得情報を用いて他プレイヤーを非難・迷惑行為に利用しないでください。
+
