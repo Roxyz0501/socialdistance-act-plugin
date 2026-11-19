@@ -56,7 +56,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)    if: startsWith(github.ref, 'refs/tags/v')
+          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)$') { throw 'Invalid release tag.' }
+          .\release.ps1 -Version $Matches.version -UseBuiltBinaries
+      - name: Upload release package
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: release-package
+          path: release/*.zip*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build-test
     runs-on: windows-2022
     permissions:
