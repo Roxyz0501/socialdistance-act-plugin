@@ -52,38 +52,23 @@ jobs:
             SocialDistance.Updater/bin/Release/net48/SocialDistance.Updater.exe
           if-no-files-found: error
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
+      - name: Package tested binaries for tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)    if: startsWith(github.ref, 'refs/tags/v')
     needs: build-test
     runs-on: windows-2022
     permissions:
       contents: write
+      actions: read
     steps:
-      - name: Check out source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - name: Set up .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
-        with:
-          dotnet-version: 8.0.x
-      - name: Validate tag and build release assets
-        id: package
-        shell: pwsh
-        run: |
-          if ('${{ github.ref_name }}' -notmatch '^v(?<version>\d+\.\d+\.\d+)$') { throw 'Tag must be vMAJOR.MINOR.PATCH.' }
-          $version = $Matches.version
-          Invoke-WebRequest 'https://advancedcombattracker.com/download.php?id=57' -OutFile "$env:RUNNER_TEMP\ACTv3.zip"
-          Expand-Archive "$env:RUNNER_TEMP\ACTv3.zip" "$env:RUNNER_TEMP\ACTv3"
-          $act = Get-ChildItem "$env:RUNNER_TEMP\ACTv3" -Recurse -Filter 'Advanced Combat Tracker.exe' | Select-Object -First 1
-          if (-not $act) { throw 'Official ACT archive did not contain Advanced Combat Tracker.exe.' }
-          $name = [Reflection.AssemblyName]::GetAssemblyName($act.FullName)
-          $token = ($name.GetPublicKeyToken() | ForEach-Object { $_.ToString('x2') }) -join ''
-          if ($token -ne 'a946b61e93d97868') { throw 'ACT assembly publisher identity did not match.' }
-          .\release.ps1 -Version $version -ActPath $act.FullName
-          "version=$version" >> $env:GITHUB_OUTPUT
-      - name: Create stable GitHub Release
+      - name: Publish tested package
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = '${{ steps.package.outputs.version }}'
-          gh release create '${{ github.ref_name }}' ".\release\SocialDistance-v$version.zip" ".\release\SocialDistance-v$version.zip.sha256" --repo '${{ github.repository }}' --verify-tag --title "SocialDistance v$version" --generate-notes
+          gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY -n release-package -D release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $zip = "./release/SocialDistance-$env:GITHUB_REF_NAME.zip"
+          gh release create $env:GITHUB_REF_NAME $zip "$zip.sha256" --repo $env:GITHUB_REPOSITORY --verify-tag --title "SocialDistance $env:GITHUB_REF_NAME" --generate-notes

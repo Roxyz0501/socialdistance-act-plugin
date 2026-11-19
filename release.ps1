@@ -3,19 +3,23 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$Version,
     [string]$Configuration = 'Release',
+    [switch]$UseBuiltBinaries,
     [string]$ActPath = 'C:\Program Files (x86)\Advanced Combat Tracker\Advanced Combat Tracker.exe'
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+if (-not $UseBuiltBinaries) {
 & dotnet build (Join-Path $root 'AetherRange\AetherRange.csproj') -c $Configuration "-p:ActPath=$ActPath" --configfile (Join-Path $root 'NuGet.Config')
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 & dotnet build (Join-Path $root 'SocialDistance.Updater\SocialDistance.Updater.csproj') -c $Configuration "-p:Version=$Version" "-p:AssemblyVersion=$Version.0" "-p:FileVersion=$Version.0" --configfile (Join-Path $root 'NuGet.Config')
 if ($LASTEXITCODE -ne 0) { throw 'Update helper build failed.' }
+}
 
 $dll = Join-Path $root "AetherRange\bin\$Configuration\net48\SocialDistance.dll"
 $updater = Join-Path $root "SocialDistance.Updater\bin\$Configuration\net48\SocialDistance.Updater.exe"
 $actual = [Reflection.AssemblyName]::GetAssemblyName($dll).Version
+if ([Reflection.AssemblyName]::GetAssemblyName($updater).Version -ne [Version]"$Version.0") { throw 'Update helper version mismatch.' }
 $actualSemVer = "$($actual.Major).$($actual.Minor).$($actual.Build)"
 if ($actualSemVer -ne $Version) { throw "DLL version $actualSemVer does not match requested release $Version." }
 
