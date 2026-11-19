@@ -13,7 +13,10 @@ namespace SocialDistance
         private readonly PluginTabs tabs;
         private readonly TabPage displayTab = new TabPage();
         private readonly TabPage distanceTab = new TabPage();
-        private readonly TabPage updateTab = new TabPage();
+        private readonly PluginUpdatePage updateTab;
+        private readonly PluginLanguagePage languagePage;
+        private string hostedLanguage;
+        private Action refreshUpdate;
         private readonly TabPage supportTab = new TabPage();
 
         private readonly CheckBox enabled = Check();
@@ -42,8 +45,6 @@ namespace SocialDistance
         private readonly Label moveHint = Label("");
         private readonly Label connectionStatus = Label("");
 
-        private readonly Label languageLabel = Label("");
-        private readonly ComboBox language = Combo();
         private readonly Label unitLabel = Label("");
         private readonly ComboBox unit = Combo();
         private readonly CheckBox showDiff = Check();
@@ -66,22 +67,6 @@ namespace SocialDistance
         private readonly Label supportUrl = Label("https://ko-fi.com/roxyz0501");
         private readonly Label supportSafety = Label("");
         private readonly Label supportStatus = Label("");
-        private readonly Label updateTitle = Label("");
-        private readonly Label updateDescription = Label("");
-        private readonly CheckBox checkUpdatesOnStartup = Check();
-        private readonly Button checkNowButton = new Button();
-        private readonly Label currentVersionCaption = Label("");
-        private readonly Label currentVersionValue = Label("");
-        private readonly Label latestVersionCaption = Label("");
-        private readonly Label latestVersionValue = Label("");
-        private readonly Label authorCaption = Label("");
-        private readonly Label authorValue = Label("Roxyz0501");
-        private readonly LinkLabel repositoryLink = new LinkLabel { AutoSize = true, Text = "https://github.com/Roxyz0501/socialdistance-act-plugin" };
-        private readonly Label updateStatus = Label("");
-        private readonly Label releaseNotesCaption = Label("");
-        private readonly TextBox releaseNotes = new TextBox();
-        private readonly Button installUpdateButton = new Button();
-        private readonly Button laterButton = new Button();
         private readonly Label versionLabel;
 
         private bool loading = true;
@@ -111,15 +96,14 @@ namespace SocialDistance
             gameMessageOnText.Text = settings.GameMessageOnText ?? "";
             gameMessageOffText.Text = settings.GameMessageOffText ?? "";
 
-            language.Items.AddRange(new object[] { "English", "日本語", "简体中文", "한국어" });
-            language.SelectedIndex = LanguageIndex(settings.Language);
+            languagePage = new PluginLanguagePage(settings.Language);
+            updateTab = new PluginUpdatePage("socialdistance-act-plugin", Assembly.GetExecutingAssembly().GetName().Version.ToString(3), settings.CheckUpdatesOnStartup, settings.Language);
             unit.Items.AddRange(new object[] { "y", "m" });
             lastDistanceUnit = settings.DistanceUnit == "m" ? "m" : "y";
             unit.SelectedIndex = lastDistanceUnit == "m" ? 1 : 0;
             showDiff.Checked = settings.ShowLinkDistanceColumn;
             spacingAlert.Checked = settings.EnableSpacingAlert;
             warningOverlay.Checked = settings.WarningOverlayEnabled;
-            checkUpdatesOnStartup.Checked = settings.CheckUpdatesOnStartup;
             rows = Numeric(settings.MaxRows, 1, 30, 0);
             maxDistance = Numeric(settings.MaxDistance, 5, 500, 0);
             alertDistance = Numeric(settings.AlertDistance, 0.5m, 500m, 1);
@@ -138,19 +122,17 @@ namespace SocialDistance
             tabs = new PluginTabs(supportTab);
             displayTab.BackColor = Color.White;
             distanceTab.BackColor = Color.White;
-            updateTab.BackColor = Color.White;
             supportTab.BackColor = Color.White;
             displayTab.Padding = new Padding(4);
             distanceTab.Padding = new Padding(4);
-            updateTab.Padding = new Padding(4);
             supportTab.Padding = new Padding(4);
             displayTab.Controls.Add(BuildDisplayLayout());
             distanceTab.Controls.Add(BuildDistanceLayout());
-            updateTab.Controls.Add(BuildUpdateLayout());
             supportTab.Controls.Add(BuildSupportLayout());
             tabs.TabPages.Add(displayTab);
             tabs.TabPages.Add(distanceTab);
-            tabs.TabPages.Add(updateTab);
+            tabs.AddContentPage(languagePage);
+            tabs.AddContentPage(updateTab);
             tabs.TabPages.Add(supportTab);
 
             var header = new Panel
@@ -200,7 +182,7 @@ namespace SocialDistance
         public event EventHandler UpdateCheckRequested;
         public event EventHandler UpdateInstallRequested;
         public event EventHandler UpdateLaterRequested;
-        public string CurrentLanguage => LanguageFromIndex(language.SelectedIndex);
+        public string CurrentLanguage => hostedLanguage ?? languagePage.LanguageCode;
         private string CurrentDistanceUnit => unit.SelectedIndex == 1 ? "m" : "y";
 
         public void ApplyTo(PluginSettings settings)
@@ -217,12 +199,12 @@ namespace SocialDistance
             settings.GameMessageTriggerEnabled = gameMessageEnabled.Checked;
             settings.GameMessageOnText = gameMessageOnText.Text.Trim();
             settings.GameMessageOffText = gameMessageOffText.Text.Trim();
-            settings.Language = CurrentLanguage;
+            if (hostedLanguage == null) settings.Language = languagePage.LanguageCode;
             settings.DistanceUnit = CurrentDistanceUnit;
             settings.ShowLinkDistanceColumn = showDiff.Checked;
             settings.EnableSpacingAlert = spacingAlert.Checked;
             settings.WarningOverlayEnabled = warningOverlay.Checked;
-            settings.CheckUpdatesOnStartup = checkUpdatesOnStartup.Checked;
+            settings.CheckUpdatesOnStartup = updateTab.CheckOnStartup;
             settings.MaxRows = (int)rows.Value;
             settings.MaxDistance = (int)maxDistance.Value;
             settings.AlertDistance = alertDistance.Value;
@@ -246,95 +228,49 @@ namespace SocialDistance
                 : "●  " + (string.IsNullOrWhiteSpace(detail) ? Localization.Waiting(CurrentLanguage) : detail);
         }
 
-        public void ShowUpdateChecking()
+        private void State(UpdatePageState state, Func<string> message)
         {
-            updateStatus.ForeColor = Color.FromArgb(73, 96, 128);
-            updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateChecking");
-            checkNowButton.Enabled = false;
-            installUpdateButton.Enabled = false;
-            laterButton.Enabled = false;
+            refreshUpdate = () => updateTab.ShowState(state, message());
+            refreshUpdate();
         }
 
+        private string T(string key, params object[] args) => Localization.Text(CurrentLanguage, key, args);
+
+        public void ShowUpdateChecking() => State(UpdatePageState.Checking, () => T("UpdateChecking"));
+        public void ShowUpdatePreparing() => State(UpdatePageState.Preparing, () => T("UpdateDownloading"));
+        public void ShowUpdatePrepared(bool success, string error, string path) =>
+            State(success ? UpdatePageState.Prepared : UpdatePageState.PrepareFailed,
+                () => success ? T("UpdatePrepared", path) : T("UpdatePrepareFailed", error ?? T("UnknownError")));
+        public void ShowUpdateSkipped(string version) => State(UpdatePageState.Ready, () => T("UpdateSkipped", version));
         public void ShowUpdateResult(UpdateCheckResult result)
         {
-            checkNowButton.Enabled = true;
-            installUpdateButton.Enabled = result != null &&
-                (result.Kind == UpdateCheckKind.Available || result.Kind == UpdateCheckKind.RateLimitedAvailable);
-            laterButton.Enabled = installUpdateButton.Enabled;
-            currentVersionValue.Text = result?.CurrentVersion?.ToString() ??
-                                       Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
-            latestVersionValue.Text = result?.Release?.Version?.ToString() ?? "—";
-            releaseNotes.Text = string.IsNullOrWhiteSpace(result?.Release?.Notes)
-                ? Localization.Text(CurrentLanguage, "NoReleaseNotes")
-                : result.Release.Notes.Trim();
-            updateStatus.ForeColor = Color.FromArgb(73, 96, 128);
-            if (result == null)
-            {
-                updateStatus.Text = Localization.Text(CurrentLanguage, "NotChecked");
-                return;
-            }
-            switch (result.Kind)
-            {
-                case UpdateCheckKind.RepositoryMissing:
-                    updateStatus.ForeColor = Color.FromArgb(151, 91, 29);
-                    updateStatus.Text = Localization.Text(CurrentLanguage, "RepositoryMissing");
-                    break;
-                case UpdateCheckKind.UpToDate:
-                    updateStatus.ForeColor = Color.FromArgb(17, 108, 75);
-                    updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateUpToDate");
-                    break;
-                case UpdateCheckKind.Available:
-                    updateStatus.ForeColor = Color.FromArgb(176, 65, 56);
-                    updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateAvailable",
-                        currentVersionValue.Text, latestVersionValue.Text);
-                    break;
-                case UpdateCheckKind.RateLimitedAvailable:
-                    updateStatus.ForeColor = Color.FromArgb(176, 101, 32);
-                    updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateRateLimitedAvailable",
-                        currentVersionValue.Text, latestVersionValue.Text);
-                    break;
-                default:
-                    updateStatus.ForeColor = Color.FromArgb(176, 65, 56);
-                    var failureKey = result.FailureKind == UpdateCheckFailureKind.RateLimit ? "UpdateRateLimited" :
-                        result.FailureKind == UpdateCheckFailureKind.Network ? "UpdateConnectionFailed" : "UpdateFailed";
-                    updateStatus.Text = failureKey == "UpdateFailed"
-                        ? Localization.Text(CurrentLanguage, failureKey,
-                            string.IsNullOrWhiteSpace(result.Error) ? Localization.Text(CurrentLanguage, "UnknownError") : result.Error)
-                        : Localization.Text(CurrentLanguage, failureKey);
-                    break;
-            }
+            if (result != null && (result.Kind == UpdateCheckKind.Available || result.Kind == UpdateCheckKind.RateLimitedAvailable))
+                State(UpdatePageState.Available, () => T(result.Kind == UpdateCheckKind.Available ? "UpdateAvailable" : "UpdateRateLimitedAvailable",
+                    result.CurrentVersion, result.Release.Version) + Environment.NewLine + (string.IsNullOrWhiteSpace(result.Release.Notes) ? T("NoReleaseNotes") : result.Release.Notes));
+            else State(UpdatePageState.Ready, () => result == null ? T("NotChecked") :
+                result.Kind == UpdateCheckKind.UpToDate ? T("UpdateUpToDate") :
+                result.Kind == UpdateCheckKind.RepositoryMissing ? T("RepositoryMissing") :
+                result.FailureKind == UpdateCheckFailureKind.Network ? T("UpdateConnectionFailed") :
+                result.FailureKind == UpdateCheckFailureKind.RateLimit ? T("UpdateRateLimited") : T("UpdateFailed", result.Error ?? T("UnknownError")));
         }
 
-        public void ShowUpdatePreparing()
+        internal void SetHostedLanguage(string code)
         {
-            updateStatus.ForeColor = Color.FromArgb(73, 96, 128);
-            updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateDownloading");
-            checkNowButton.Enabled = installUpdateButton.Enabled = laterButton.Enabled = false;
+            hostedLanguage = Localization.NormalizeLanguage(code);
+            foreach (var page in new TabPage[] { languagePage, updateTab, supportTab })
+                if (tabs.TabPages.Contains(page)) tabs.TabPages.Remove(page);
+            ApplyLanguage(CurrentLanguage);
         }
 
-        public void ShowUpdatePrepared(bool success, string error, string stagedDllPath)
+        protected override void Dispose(bool disposing)
         {
-            checkNowButton.Enabled = true;
-            installUpdateButton.Enabled = !success;
-            laterButton.Enabled = !success;
-            updateStatus.ForeColor = success ? Color.FromArgb(17, 108, 75) : Color.FromArgb(176, 65, 56);
-            updateStatus.Text = success
-                ? Localization.Text(CurrentLanguage, "UpdatePrepared", stagedDllPath ?? "")
-                : Localization.Text(CurrentLanguage, "UpdatePrepareFailed",
-                    string.IsNullOrWhiteSpace(error) ? Localization.Text(CurrentLanguage, "UnknownError") : error);
-        }
-
-        public void ShowUpdateSkipped(string version)
-        {
-            installUpdateButton.Enabled = false;
-            laterButton.Enabled = false;
-            updateStatus.ForeColor = Color.FromArgb(73, 96, 128);
-            updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateSkipped", version);
+            if (disposing && hostedLanguage != null) { languagePage.Dispose(); updateTab.Dispose(); supportTab.Dispose(); }
+            base.Dispose(disposing);
         }
 
         public void FocusUpdateTab()
         {
-            tabs.SelectedTab = updateTab;
+            if (tabs.TabPages.Contains(updateTab)) tabs.SelectedTab = updateTab;
         }
 
         protected override void OnResize(EventArgs e)
@@ -418,8 +354,6 @@ namespace SocialDistance
         private Control BuildDistanceLayout()
         {
             var layout = BaseLayout(12);
-            layout.Controls.Add(languageLabel, 0, 0);
-            layout.Controls.Add(language, 1, 0);
             layout.Controls.Add(unitLabel, 0, 1);
             layout.Controls.Add(unit, 1, 1);
             AddWide(layout, showDiff, 2);
@@ -444,7 +378,7 @@ namespace SocialDistance
             layout.Controls.Add(alertModeLabel, 0, 10);
             layout.Controls.Add(alertMode, 1, 10);
 
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
@@ -453,100 +387,6 @@ namespace SocialDistance
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
             for (var i = 7; i <= 10; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            return layout;
-        }
-
-        private Control BuildUpdateLayout()
-        {
-            var layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 11,
-                Padding = new Padding(24),
-                BackColor = Color.White
-            };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-
-            updateTitle.AutoSize = false;
-            updateTitle.Dock = DockStyle.Fill;
-            updateTitle.Font = new Font("Yu Gothic UI Semibold", 16f, FontStyle.Bold);
-            updateTitle.ForeColor = Color.FromArgb(34, 44, 61);
-            AddWide(layout, updateTitle, 0);
-            updateDescription.AutoSize = false;
-            updateDescription.Dock = DockStyle.Fill;
-            updateDescription.ForeColor = Color.FromArgb(73, 96, 128);
-            AddWide(layout, updateDescription, 1);
-            layout.Controls.Add(checkUpdatesOnStartup, 0, 2);
-
-            checkNowButton.Width = 150;
-            checkNowButton.Height = 30;
-            checkNowButton.Anchor = AnchorStyles.Left;
-            checkNowButton.FlatStyle = FlatStyle.Flat;
-            checkNowButton.BackColor = Color.FromArgb(244, 247, 251);
-            layout.Controls.Add(checkNowButton, 1, 2);
-
-            layout.Controls.Add(currentVersionCaption, 0, 3);
-            currentVersionValue.Text = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
-            currentVersionValue.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
-            layout.Controls.Add(currentVersionValue, 1, 3);
-            layout.Controls.Add(latestVersionCaption, 0, 4);
-            latestVersionValue.Text = "—";
-            latestVersionValue.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
-            layout.Controls.Add(latestVersionValue, 1, 4);
-            layout.Controls.Add(authorCaption, 0, 5);
-            authorValue.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
-            layout.Controls.Add(authorValue, 1, 5);
-            repositoryLink.LinkColor = Color.FromArgb(30, 91, 145);
-            repositoryLink.ActiveLinkColor = Color.FromArgb(202, 101, 20);
-            layout.Controls.Add(repositoryLink, 1, 6);
-
-            updateStatus.AutoSize = false;
-            updateStatus.Dock = DockStyle.Fill;
-            AddWide(layout, updateStatus, 7);
-            AddWide(layout, releaseNotesCaption, 8);
-            releaseNotes.Multiline = true;
-            releaseNotes.ReadOnly = true;
-            releaseNotes.ScrollBars = ScrollBars.Vertical;
-            releaseNotes.Dock = DockStyle.Fill;
-            releaseNotes.BackColor = Color.FromArgb(250, 251, 252);
-            layout.Controls.Add(releaseNotes, 0, 9);
-            layout.SetColumnSpan(releaseNotes, 2);
-
-            var buttons = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                Margin = Padding.Empty
-            };
-            installUpdateButton.Width = 250;
-            installUpdateButton.Height = 40;
-            installUpdateButton.FlatStyle = FlatStyle.Flat;
-            installUpdateButton.BackColor = Color.FromArgb(202, 101, 20);
-            installUpdateButton.ForeColor = Color.White;
-            installUpdateButton.Font = new Font("Yu Gothic UI Semibold", 10f, FontStyle.Bold);
-            installUpdateButton.Enabled = false;
-            laterButton.Width = 110;
-            laterButton.Height = 40;
-            laterButton.FlatStyle = FlatStyle.Flat;
-            laterButton.Enabled = false;
-            buttons.Controls.Add(installUpdateButton);
-            buttons.Controls.Add(laterButton);
-            layout.Controls.Add(buttons, 0, 10);
-            layout.SetColumnSpan(buttons, 2);
             return layout;
         }
 
@@ -643,7 +483,7 @@ namespace SocialDistance
             gameMessageEnabled.CheckedChanged += Changed;
             gameMessageOnText.TextChanged += Changed;
             gameMessageOffText.TextChanged += Changed;
-            language.SelectedIndexChanged += delegate { ApplyLanguage(CurrentLanguage); Changed(this, EventArgs.Empty); };
+            languagePage.LanguageChanged += delegate { ApplyLanguage(CurrentLanguage); Changed(this, EventArgs.Empty); };
             unit.SelectedIndexChanged += OnUnitChanged;
             showDiff.CheckedChanged += Changed;
             spacingAlert.CheckedChanged += Changed;
@@ -652,12 +492,11 @@ namespace SocialDistance
             maxDistance.ValueChanged += Changed;
             alertDistance.ValueChanged += Changed;
             alertMode.SelectedIndexChanged += Changed;
-            checkUpdatesOnStartup.CheckedChanged += Changed;
-            checkNowButton.Click += delegate { UpdateCheckRequested?.Invoke(this, EventArgs.Empty); };
-            installUpdateButton.Click += delegate { UpdateInstallRequested?.Invoke(this, EventArgs.Empty); };
-            laterButton.Click += delegate { UpdateLaterRequested?.Invoke(this, EventArgs.Empty); };
+            updateTab.StartupChanged += Changed;
+            updateTab.CheckRequested += delegate { UpdateCheckRequested?.Invoke(this, EventArgs.Empty); };
+            updateTab.InstallRequested += delegate { UpdateInstallRequested?.Invoke(this, EventArgs.Empty); };
+            updateTab.LaterRequested += delegate { UpdateLaterRequested?.Invoke(this, EventArgs.Empty); };
             supportButton.Click += OpenSupportLink;
-            repositoryLink.LinkClicked += OpenRepositoryLink;
         }
 
         private void ApplyLanguage(string languageCode)
@@ -667,7 +506,8 @@ namespace SocialDistance
             headerSubtitle.Text = Localization.Text(languageCode, "HeaderSubtitle");
             displayTab.Text = Localization.Text(languageCode, "TabDisplay");
             distanceTab.Text = Localization.Text(languageCode, "TabDistance");
-            updateTab.Text = Localization.Text(languageCode, "TabUpdate");
+            updateTab.SetLanguage(languageCode);
+            if (refreshUpdate == null) ShowUpdateResult(null); else refreshUpdate();
             supportTab.Text = Localization.Text(languageCode, "TabSupport");
             tabs.SetLanguageFont(languageCode == Localization.Japanese ? "Yu Gothic UI" :
                 languageCode == Localization.SimplifiedChinese ? "Microsoft YaHei UI" :
@@ -688,7 +528,6 @@ namespace SocialDistance
             gameMessageOffLabel.Text = Localization.Text(languageCode, "GameMessageOff");
             gameMessageHint.Text = Localization.Text(languageCode, "GameMessageHint");
             moveHint.Text = Localization.Text(languageCode, "MoveHint");
-            languageLabel.Text = Localization.Text(languageCode, "Language");
             unitLabel.Text = Localization.Text(languageCode, "DistanceUnit");
             showDiff.Text = Localization.Text(languageCode, "ShowDiff");
             diffExplanation.Text = Localization.Text(languageCode, "DiffExplanation");
@@ -705,22 +544,6 @@ namespace SocialDistance
             supportButton.Text = Localization.Text(languageCode, "SupportButton");
             supportSafety.Text = Localization.Text(languageCode, "SupportSafety");
             supportStatus.Text = "";
-            updateTitle.Text = Localization.Text(languageCode, "UpdateTitle");
-            updateDescription.Text = Localization.Text(languageCode, "UpdateDescription");
-            checkUpdatesOnStartup.Text = Localization.Text(languageCode, "CheckAtStartup");
-            checkNowButton.Text = Localization.Text(languageCode, "CheckNow");
-            currentVersionCaption.Text = Localization.Text(languageCode, "CurrentVersion");
-            latestVersionCaption.Text = Localization.Text(languageCode, "LatestVersion");
-            authorCaption.Text = Localization.Text(languageCode, "Author");
-            repositoryLink.Text = Localization.Text(languageCode, "RepositoryLink");
-            releaseNotesCaption.Text = Localization.Text(languageCode, "ReleaseNotes");
-            installUpdateButton.Text = Localization.Text(languageCode, "UpdateButton");
-            laterButton.Text = Localization.Text(languageCode, "LaterButton");
-            if (string.IsNullOrWhiteSpace(updateStatus.Text))
-                updateStatus.Text = Localization.Text(languageCode, "NotChecked");
-            if (string.IsNullOrWhiteSpace(releaseNotes.Text))
-                releaseNotes.Text = Localization.Text(languageCode, "NoReleaseNotes");
-
             var selected = Math.Max(0, alertMode.SelectedIndex);
             loading = true;
             alertMode.Items.Clear();
@@ -750,17 +573,6 @@ namespace SocialDistance
                 string.Equals(error, "Invalid web address.", StringComparison.Ordinal)
                     ? Localization.Text(CurrentLanguage, "InvalidAddress")
                     : error);
-        }
-
-        private void OpenRepositoryLink(object sender, LinkLabelLinkClickedEventArgs e)
-        {
-            string error;
-            if (ExternalLinkLauncher.TryOpen("https://github.com/Roxyz0501/socialdistance-act-plugin", out error))
-                return;
-            updateStatus.ForeColor = Color.FromArgb(176, 65, 56);
-            updateStatus.Text = Localization.Text(CurrentLanguage, "UpdatePrepareFailed",
-                string.Equals(error, "Invalid web address.", StringComparison.Ordinal)
-                    ? Localization.Text(CurrentLanguage, "InvalidAddress") : error);
         }
 
         private void UpdateEchoExample()
@@ -854,26 +666,5 @@ namespace SocialDistance
         };
         private static decimal Bound(NumericUpDown control, decimal value) => Math.Max(control.Minimum, Math.Min(control.Maximum, value));
         private static int Clamp(int value, int min, int max) => Math.Max(min, Math.Min(max, value));
-        private static int LanguageIndex(string value)
-        {
-            switch (Localization.NormalizeLanguage(value))
-            {
-                case Localization.Japanese: return 1;
-                case Localization.SimplifiedChinese: return 2;
-                case Localization.Korean: return 3;
-                default: return 0;
-            }
-        }
-
-        private static string LanguageFromIndex(int index)
-        {
-            switch (index)
-            {
-                case 1: return Localization.Japanese;
-                case 2: return Localization.SimplifiedChinese;
-                case 3: return Localization.Korean;
-                default: return Localization.English;
-            }
-        }
     }
 }

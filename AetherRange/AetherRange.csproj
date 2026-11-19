@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <Compile Include="..\shared\PluginTabs.cs" Link="PluginTabs.cs" />
+    <Compile Include="..\shared\PluginLanguagePage.cs" Link="PluginLanguagePage.cs" />
+    <Compile Include="..\shared\PluginUpdatePage.cs" Link="PluginUpdatePage.cs" />
     <Reference Include="Advanced Combat Tracker">
       <HintPath>$(ActPath)</HintPath>
       <Private>false</Private>

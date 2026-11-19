@@ -15,6 +15,19 @@ namespace SocialDistance
     {
         private Label actStatusLabel;
         private SettingsControl settingsControl;
+        private string hostedLanguage;
+        private Func<string> statusMessage;
+        private string EffectiveLanguage => hostedLanguage ?? settings?.Language;
+        public void SetHostedLanguage(string code)
+        {
+            if (!acceptingWork || settingsControl == null) return;
+            hostedLanguage = Localization.NormalizeLanguage(code);
+            settingsControl.SetHostedLanguage(code);
+            overlay.Language = warningOverlay.Language = EffectiveLanguage;
+            overlay.Invalidate();
+            warningOverlay.Invalidate();
+            RefreshStatus();
+        }
         private OverlayForm overlay;
         private WarningOverlayForm warningOverlay;
         private FfxivDataSource dataSource;
@@ -57,6 +70,7 @@ namespace SocialDistance
             lifecycleCancellation = new CancellationTokenSource();
             dataSource = new FfxivDataSource();
 
+            hostedLanguage = null;
             settingsControl = new SettingsControl(settings);
             settingsControl.SettingsChanged += OnSettingsChanged;
             settingsControl.UpdateCheckRequested += OnUpdateCheckRequested;
@@ -83,7 +97,7 @@ namespace SocialDistance
                 MaximumDistance = settings.MaxDistance,
                 DistanceUnit = settings.DistanceUnit,
                 BackgroundOpacityPercent = settings.BackgroundOpacityPercent,
-                Language = settings.Language
+                Language = EffectiveLanguage
             };
             overlay.SetOpacityPercent(settings.OpacityPercent);
             overlay.BoundsChangedByUser += OnOverlayBoundsChanged;
@@ -96,7 +110,7 @@ namespace SocialDistance
                     Math.Max(40, Math.Min(180, settings.WarningOverlayHeight))),
                 Locked = settings.OverlayLocked,
                 BackgroundOpacityPercent = settings.BackgroundOpacityPercent,
-                Language = settings.Language
+                Language = EffectiveLanguage
             };
             warningOverlay.SetOpacityPercent(settings.OpacityPercent);
             warningOverlay.BoundsChangedByUser += OnWarningOverlayBoundsChanged;
@@ -113,7 +127,7 @@ namespace SocialDistance
             ActGlobals.oFormActMain.OnLogLineRead += OnLogLineRead;
 
             ApplyVisibility();
-            actStatusLabel.Text = Localization.Text(settings.Language, "Started");
+            SetStatus(() => Localization.Text(EffectiveLanguage, "Started"));
             settingsControl.ShowUpdateResult(null);
             if (settings.CheckUpdatesOnStartup)
                 BeginUpdateCheck(false);
@@ -162,13 +176,13 @@ namespace SocialDistance
             }
             catch (Exception ex)
             {
-                SetStatus(Localization.Text(settings?.Language, "UpdatePrepareFailed", ex.GetBaseException().Message));
+                SetStatus(() => Localization.Text(EffectiveLanguage, "UpdatePrepareFailed", ex.GetBaseException().Message));
             }
 
             var finalSave = settingsPersistence?.Flush(settings, DateTime.UtcNow);
             if (finalSave != null && finalSave.State == SettingsSaveState.Failed)
-                SetStatus(Localization.Text(settings?.Language, "SaveFailed",
-                    finalSave.Error == null ? Localization.Text(settings?.Language, "UnknownError") : finalSave.Error.Message));
+                SetStatus(() => Localization.Text(EffectiveLanguage, "SaveFailed",
+                    finalSave.Error == null ? Localization.Text(EffectiveLanguage, "UnknownError") : finalSave.Error.Message));
 
             if (overlay != null)
             {
@@ -196,7 +210,7 @@ namespace SocialDistance
             if (actStatusLabel != null)
             {
                 if (finalSave == null || finalSave.State != SettingsSaveState.Failed)
-                    actStatusLabel.Text = Localization.Text(settings?.Language, "Stopped");
+                    actStatusLabel.Text = Localization.Text(EffectiveLanguage, "Stopped");
             }
         }
 
@@ -213,7 +227,7 @@ namespace SocialDistance
             var process = dataSource.GetGameProcess();
             var connected = process != null && !process.HasExited;
             settingsControl.SetConnectionStatus(connected,
-                settings.Language == "en" ? dataSource.LastError : null);
+                EffectiveLanguage == "en" ? dataSource.LastError : null);
 
             if (!connected || (settings.HideWhenFfxivInactive && !IsGameForeground(process)))
             {
@@ -234,6 +248,7 @@ namespace SocialDistance
         private void OnSettingsChanged(object sender, EventArgs e)
         {
             settingsControl.ApplyTo(settings);
+            RefreshStatus();
             overlay.Locked = settings.OverlayLocked;
             overlay.SetOpacityPercent(settings.OpacityPercent);
             overlay.AlertDistance = settings.AlertDistance;
@@ -246,12 +261,11 @@ namespace SocialDistance
             overlay.MaximumDistance = settings.MaxDistance;
             overlay.DistanceUnit = settings.DistanceUnit;
             overlay.BackgroundOpacityPercent = settings.BackgroundOpacityPercent;
-            overlay.Language = settings.Language;
+            overlay.Language = EffectiveLanguage;
             warningOverlay.Locked = settings.OverlayLocked;
             warningOverlay.SetOpacityPercent(settings.OpacityPercent);
             warningOverlay.BackgroundOpacityPercent = settings.BackgroundOpacityPercent;
-            warningOverlay.Language = settings.Language;
-            settingsControl.ShowUpdateResult(lastUpdateResult);
+            warningOverlay.Language = EffectiveLanguage;
             ApplyVisibility();
         }
 
@@ -261,8 +275,8 @@ namespace SocialDistance
                 return;
             var result = settingsPersistence.Poll(settings, DateTime.UtcNow);
             if (result.State == SettingsSaveState.Failed)
-                SetStatus(Localization.Text(settings.Language, "SaveFailed",
-                    result.Error == null ? Localization.Text(settings.Language, "UnknownError") : result.Error.Message));
+                SetStatus(() => Localization.Text(EffectiveLanguage, "SaveFailed",
+                    result.Error == null ? Localization.Text(EffectiveLanguage, "UnknownError") : result.Error.Message));
         }
 
         private void OnLogLineRead(bool isImport, LogLineEventArgs logInfo)
@@ -348,9 +362,9 @@ namespace SocialDistance
             settingsControl?.SetOverlayEnabled(settings.OverlayEnabled);
             ApplyVisibility();
             if (actStatusLabel != null)
-                actStatusLabel.Text = Localization.Text(settings.Language, "OverlayChanged",
-                    Localization.Text(settings.Language, settings.OverlayEnabled ? "Enabled" : "Disabled"),
-                    Localization.Text(settings.Language, sourceKey));
+                SetStatus(() => Localization.Text(EffectiveLanguage, "OverlayChanged",
+                    Localization.Text(EffectiveLanguage, settings.OverlayEnabled ? "Enabled" : "Disabled"),
+                    Localization.Text(EffectiveLanguage, sourceKey)));
         }
 
         private void OnOverlayBoundsChanged(object sender, EventArgs e)
@@ -479,7 +493,7 @@ namespace SocialDistance
                     if (result.Kind == UpdateCheckKind.Available || result.Kind == UpdateCheckKind.RateLimitedAvailable)
                     {
                         settingsControl.FocusUpdateTab();
-                        SetStatus(Localization.Text(settings.Language,
+                        SetStatus(() => Localization.Text(EffectiveLanguage,
                             result.Kind == UpdateCheckKind.RateLimitedAvailable ? "UpdateRateLimitedAvailable" : "UpdateAvailable",
                             result.CurrentVersion, result.Release.Version));
                     }
@@ -513,7 +527,7 @@ namespace SocialDistance
                     var actProcess = Process.GetCurrentProcess();
                     result = await updatePackageManager.PrepareAsync(release, targetPluginPath,
                         actProcess.Id, actProcess.StartTime.ToUniversalTime().Ticks,
-                        settings.Language, cancellationToken).ConfigureAwait(false);
+                        EffectiveLanguage, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
@@ -529,11 +543,11 @@ namespace SocialDistance
             {
                 updateInstallRunning = false;
                 settingsControl.ShowUpdatePrepared(result.Success, result.Error, result.StagedPluginPath);
-                SetStatus(result.Success
-                    ? Localization.Text(settings.Language, "UpdatePrepared", result.StagedPluginPath)
-                    : Localization.Text(settings.Language, "UpdatePrepareFailed",
+                SetStatus(() => result.Success
+                    ? Localization.Text(EffectiveLanguage, "UpdatePrepared", result.StagedPluginPath)
+                    : Localization.Text(EffectiveLanguage, "UpdatePrepareFailed",
                         string.IsNullOrWhiteSpace(result.Error)
-                            ? Localization.Text(settings.Language, "UnknownError")
+                            ? Localization.Text(EffectiveLanguage, "UnknownError")
                             : result.Error));
             });
         }
@@ -605,10 +619,16 @@ namespace SocialDistance
                 action();
         }
 
-        private void SetStatus(string message)
+        private void SetStatus(Func<string> message)
+        {
+            statusMessage = message;
+            RefreshStatus();
+        }
+
+        private void RefreshStatus()
         {
             if (actStatusLabel != null && !actStatusLabel.IsDisposed)
-                actStatusLabel.Text = message;
+                actStatusLabel.Text = statusMessage?.Invoke() ?? string.Empty;
         }
     }
 }

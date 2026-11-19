@@ -43,6 +43,9 @@ jobs:
         run: |
           dotnet build .\SocialDistance.Tests\SocialDistance.Tests.csproj -c Release --configfile .\NuGet.Config
           .\SocialDistance.Tests\bin\Release\net48\SocialDistance.Tests.exe
+      - name: Test standalone and hosted WinForms tabs
+        shell: powershell
+        run: .\SocialDistance.Tests\Test-TabIntegration.ps1
       - name: Upload verified plugin DLL
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
