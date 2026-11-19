@@ -37,7 +37,8 @@ namespace SocialDistance
         }
 
         public async Task<UpdatePreparationResult> PrepareAsync(
-            ReleaseInfo release, CancellationToken cancellationToken)
+            ReleaseInfo release, string targetPluginPath, int actProcessId, long actStartTimeUtcTicks,
+            string language, CancellationToken cancellationToken)
         {
             string stage = null;
             try
@@ -45,6 +46,12 @@ namespace SocialDistance
                 cancellationToken.ThrowIfCancellationRequested();
                 if (release == null || release.Version == null || !release.Version.IsStable)
                     throw new InvalidDataException("Release metadata is invalid.");
+                if (string.IsNullOrWhiteSpace(targetPluginPath) || actProcessId <= 0 || actStartTimeUtcTicks <= 0)
+                    throw new InvalidDataException("The ACT plugin installation location could not be verified.");
+                targetPluginPath = Path.GetFullPath(targetPluginPath);
+                if (!string.Equals(Path.GetFileName(targetPluginPath), "SocialDistance.dll", StringComparison.OrdinalIgnoreCase) ||
+                    !File.Exists(targetPluginPath))
+                    throw new InvalidDataException("The registered SocialDistance.dll was not found.");
 
                 var version = release.Version.ToString();
                 var expectedNames = new[]
@@ -60,6 +67,8 @@ namespace SocialDistance
                     release.Assets.FirstOrDefault(x =>
                         string.Equals(x.Name, "SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase));
                 if (checksum == null) throw new InvalidDataException("SHA-256 manifest was not found.");
+                if (!IsExpectedReleaseAssetUrl(release, package) || !IsExpectedReleaseAssetUrl(release, checksum))
+                    throw new InvalidDataException("Release asset URL does not match the configured repository and stable tag.");
 
                 var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "SocialDistance", "Updates");
@@ -77,15 +86,31 @@ namespace SocialDistance
                     throw new InvalidDataException("Package SHA-256 verification failed.");
 
                 var stagedDll = Path.Combine(stage, "SocialDistance.dll");
-                await ExtractValidatedPluginAsync(packagePath, stagedDll, cancellationToken).ConfigureAwait(false);
+                var stagedUpdater = Path.Combine(stage, "SocialDistance.Updater.exe");
+                await ExtractValidatedPackageAsync(packagePath, stagedDll, stagedUpdater, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 ValidatePluginAssembly(stagedDll, release.Version);
+                ValidateUpdaterAssembly(stagedUpdater, release.Version);
                 cancellationToken.ThrowIfCancellationRequested();
+                var arguments = BuildUpdaterArguments(targetPluginPath, stagedDll, actProcessId,
+                    actStartTimeUtcTicks, version, language);
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = stagedUpdater,
+                    Arguments = arguments,
+                    WorkingDirectory = stage,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                var updater = Process.Start(startInfo);
+                if (updater == null) throw new InvalidOperationException("Could not start the verified update helper.");
+                updater.Dispose();
                 return new UpdatePreparationResult
                 {
                     Success = true,
                     StagingDirectory = stage,
-                    StagedPluginPath = stagedDll
+                    StagedPluginPath = targetPluginPath
                 };
             }
             catch (OperationCanceledException)
@@ -109,6 +134,20 @@ namespace SocialDistance
                 normalized.Split('/').Any(part => part == ".."))
                 return false;
             return !Path.IsPathRooted(entryName);
+        }
+
+        public static bool IsExpectedReleaseAssetUrl(ReleaseInfo release, ReleaseAssetInfo asset)
+        {
+            if (release == null || release.Version == null || asset == null || string.IsNullOrWhiteSpace(asset.Name)) return false;
+            SemVersion tagVersion;
+            if (!SemVersion.TryParse(release.TagName, out tagVersion) || !tagVersion.IsStable ||
+                tagVersion.CompareTo(release.Version) != 0) return false;
+            Uri uri;
+            if (!Uri.TryCreate(asset.DownloadUrl, UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps ||
+                !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)) return false;
+            var expected = "/" + UpdateRepository.Owner + "/" + UpdateRepository.Name + "/releases/download/" +
+                           Uri.EscapeDataString(release.TagName) + "/" + asset.Name;
+            return string.Equals(Uri.UnescapeDataString(uri.AbsolutePath), expected, StringComparison.OrdinalIgnoreCase);
         }
 
         public static string ComputeSha256(string path)
@@ -198,8 +237,8 @@ namespace SocialDistance
                    host == "release-assets.githubusercontent.com";
         }
 
-        private static async Task ExtractValidatedPluginAsync(string packagePath, string destination,
-            CancellationToken cancellationToken)
+        private static async Task ExtractValidatedPackageAsync(string packagePath, string pluginDestination,
+            string updaterDestination, CancellationToken cancellationToken)
         {
             using (var archive = ZipFile.OpenRead(packagePath))
             {
@@ -211,12 +250,64 @@ namespace SocialDistance
                 }
                 var candidates = archive.Entries.Where(x =>
                     string.Equals(Path.GetFileName(x.FullName), "SocialDistance.dll",
-                        StringComparison.OrdinalIgnoreCase) && x.Length > 0 && x.Length <= MaximumPluginBytes).ToList();
-                if (candidates.Count != 1) throw new InvalidDataException("Package must contain exactly one SocialDistance.dll.");
-                using (var input = candidates[0].Open())
-                using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    await input.CopyToAsync(output, 81920, cancellationToken).ConfigureAwait(false);
+                        StringComparison.OrdinalIgnoreCase)).ToList();
+                var updaterEntries = archive.Entries.Where(x =>
+                    string.Equals(Path.GetFileName(x.FullName), "SocialDistance.Updater.exe",
+                        StringComparison.OrdinalIgnoreCase)).ToList();
+                if (candidates.Count != 1 || candidates[0].Length <= 0 || candidates[0].Length > MaximumPluginBytes)
+                    throw new InvalidDataException("Package must contain exactly one valid SocialDistance.dll.");
+                if (updaterEntries.Count != 1 || updaterEntries[0].Length <= 0 || updaterEntries[0].Length > MaximumPluginBytes)
+                    throw new InvalidDataException("Package must contain exactly one valid SocialDistance.Updater.exe.");
+                await CopyEntryAsync(candidates[0], pluginDestination, cancellationToken).ConfigureAwait(false);
+                await CopyEntryAsync(updaterEntries[0], updaterDestination, cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        private static async Task CopyEntryAsync(ZipArchiveEntry entry, string destination, CancellationToken cancellationToken)
+        {
+            using (var input = entry.Open())
+            using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                await input.CopyToAsync(output, 81920, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static void ValidateUpdaterAssembly(string path, SemVersion releaseVersion)
+        {
+            var name = AssemblyName.GetAssemblyName(path);
+            if (!string.Equals(name.Name, "SocialDistance.Updater", StringComparison.Ordinal))
+                throw new InvalidDataException("Package contains an unexpected update helper.");
+            SemVersion assemblyVersion;
+            if (!SemVersion.TryParse(name.Version.Major + "." + name.Version.Minor + "." +
+                                     Math.Max(0, name.Version.Build), out assemblyVersion) ||
+                assemblyVersion.CompareTo(releaseVersion) != 0)
+                throw new InvalidDataException("Update helper version does not match the Release tag.");
+            if (!string.Equals(FileVersionInfo.GetVersionInfo(path).CompanyName, "Roxyz0501", StringComparison.Ordinal))
+                throw new InvalidDataException("Update helper author metadata is invalid.");
+        }
+
+        private static string QuoteArgument(string value)
+        {
+            var result = new StringBuilder("\"");
+            var slashes = 0;
+            foreach (var ch in value ?? "")
+            {
+                if (ch == '\\') { slashes++; continue; }
+                if (ch == '"') result.Append('\\', slashes * 2 + 1);
+                else result.Append('\\', slashes);
+                result.Append(ch);
+                slashes = 0;
+            }
+            result.Append('\\', slashes * 2);
+            result.Append('"');
+            return result.ToString();
+        }
+
+        public static string BuildUpdaterArguments(string target, string staged, int processId,
+            long startTimeUtcTicks, string version, string language)
+        {
+            return "--apply " + QuoteArgument(target) + " " + QuoteArgument(staged) + " " +
+                   processId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " +
+                   startTimeUtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " +
+                   QuoteArgument(version) + " " + QuoteArgument(language ?? "en");
         }
 
         private static void ValidatePluginAssembly(string path, SemVersion releaseVersion)
@@ -251,4 +342,3 @@ namespace SocialDistance
         public void Dispose() => client.Dispose();
     }
 }
-

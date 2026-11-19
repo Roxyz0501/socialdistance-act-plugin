@@ -70,28 +70,28 @@ FFXIV_ACT_PluginはSocialDistanceより先にロードしてください。接�
 
 ## 更新機能
 
-更新確認は既定でONです。「更新」タブからOFFにしたり、「今すぐ確認」を実行できます。起動時確認はUIをブロックしない非同期処理で1回だけ行い、GitHub Releasesのdraftとprereleaseを除外した安定版だけを対象にします。通信失敗、タイムアウト、API制限、JSON不正が発生しても通常機能は継続します。
+更新確認は既定でONです。「更新」タブからOFFにしたり、「今すぐ確認」を実行できます。起動時確認はUIをブロックしない非同期処理で1回だけ行い、HTTPSの `releases/latest` リダイレクト先から安定版タグを確認します。インストール中と同じバージョンならGitHub REST APIは呼び出しません。新しい版がある場合のみタグ指定のAPIを確認し、403／429ならそのタグ固定の公式資産を使うフォールバックを表示します。通信失敗・タイムアウト・API制限は区別して表示し、失敗時の連続再試行はしません。
 
-更新は利用者が「更新をダウンロードして準備」を押した場合だけ開始します。Release assetとSHA-256を確認し、ZIPのパストラバーサル、Zip Slip、異なるプラグイン、Releaseタグと異なるバージョン、作者情報の不一致を拒否します。検証後は補助プロセスがACT終了を待ち、現行DLLをバックアップしてから置換します。置換またはハッシュ確認に失敗した場合はバックアップから復元します。
+更新は利用者が「更新する」を押した場合だけ開始します。Release assetのURLが対象リポジトリ・タグと一致すること、SHA-256、ZIP内のDLLと補助更新プログラムのアセンブリ名・作者・バージョンを確認し、Zip Slipや想定外のパッケージを拒否します。補助更新プログラムはACTの登録情報から取得した実際のDLLパスを使い、ACT終了を待って同じフォルダー内でバックアップ付きの置換を行います。置換後の検証に失敗した場合はバックアップから復元します。処理後にACTを再起動してください。
 
-更新元は公開リポジトリ [Roxyz0501/socialdistance-act-plugin](https://github.com/Roxyz0501/socialdistance-act-plugin) の安定版Releasesです。認証トークンは不要で、トークンをソースやDLLへ埋め込んでいません。公開ReleaseのHTTPS APIとRelease assetだけを使用します。
+更新元は公開リポジトリ [Roxyz0501/socialdistance-act-plugin](https://github.com/Roxyz0501/socialdistance-act-plugin) の安定版Releasesです。認証トークンは不要で、トークンをソースやDLLへ埋め込んでいません。公開Releaseページ、HTTPS API、同一リポジトリのRelease assetだけを使用します。
 
 プロジェクト本体のライセンスは現時点では未設定です。ジョブアイコン素材には、同梱の `AetherRange/Assets/Jobs/XIVAPI-LICENSE.txt` が適用されます。
 
 ### Release assetの作成
 
-AssemblyInfoのバージョンを更新後、次を実行します。
+AssemblyInfoのプラグインバージョンと `SocialDistance.Updater.csproj` の既定バージョンを更新後、次を実行します。補助プログラムも同じバージョンでビルドされ、ZIPへ同梱されます。
 
 ~~~powershell
-.\release.ps1 -Version 2.5.1
+.\release.ps1 -Version 2.5.2
 ~~~
 
-releaseフォルダへSocialDistance-v2.5.1.zipとSocialDistance-v2.5.1.zip.sha256が生成されます。タグはv2.5.1のようなSemVerにし、draft／prereleaseではないGitHub Releaseへ両方を添付します。
+releaseフォルダへSocialDistance-v2.5.2.zipとSocialDistance-v2.5.2.zip.sha256が生成されます。タグはv2.5.2のようなSemVerにし、draft／prereleaseではないGitHub Releaseへ両方を添付します。
 
 GitHub CLIを使用する例:
 
 ~~~powershell
-gh release create v2.5.1 .\release\SocialDistance-v2.5.1.zip .\release\SocialDistance-v2.5.1.zip.sha256 --title "SocialDistance v2.5.1" --notes-file .\RELEASE_NOTES.md
+gh release create v2.5.2 .\release\SocialDistance-v2.5.2.zip .\release\SocialDistance-v2.5.2.zip.sha256 --title "SocialDistance v2.5.2" --notes-file .\RELEASE_NOTES.md
 ~~~
 
 通常は `vMAJOR.MINOR.PATCH` タグをmainへpushすると、GitHub ActionsがWindows上で公式ACT ZIPを取得し、署名済みACTアセンブリの公開鍵トークンを検証してからビルドとテストを行います。成功時だけ同じ名前のZIPとSHA-256マニフェストを添付した安定版Releaseを作成します。ACT本体はRelease assetへ含めません。
@@ -123,4 +123,3 @@ ACTを標準以外の場所へインストールしている場合:
 ## 注意
 
 ACTを含む外部ツールの利用は自己責任です。ゲーム内で取得情報を用いて他プレイヤーを非難・迷惑行為に利用しないでください。
-

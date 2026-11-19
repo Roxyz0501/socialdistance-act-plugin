@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -18,6 +19,10 @@ internal static class Program
         Equal("en", Localization.ResolveInitialLanguage("", "fr-FR"), "OS fallback");
         Equal("ja", Localization.ResolveInitialLanguage("ja", "en-US"), "Configured language retained");
         Equal("SOCIAL DISTANCE", Localization.Text("ja", "OverlayTitle"), "Missing key falls back to English");
+        True(Localization.Text("en", "UpdateConnectionFailed") != Localization.Text("ja", "UpdateConnectionFailed"),
+            "Update network error is localized");
+        True(Localization.Text("ko", "UpdateRateLimited") != Localization.Text("en", "UpdateRateLimited"),
+            "Update API limit is localized");
 
         SemVersion v123, v124, prerelease, stable;
         True(SemVersion.TryParse("v1.2.3", out v123), "SemVer v prefix");
@@ -36,6 +41,7 @@ internal static class Program
             "Update available classification");
         Equal(UpdateCheckKind.UpToDate, GitHubReleaseClient.Evaluate(new Version(2, 5, 0), release).Kind,
             "No update classification");
+        TestReleaseLatestApiBudget();
         True(UpdateRepository.IsConfigured, "Update repository configured");
         Equal("Roxyz0501", UpdateRepository.Owner, "Update repository owner");
         Equal("socialdistance-act-plugin", UpdateRepository.Name, "Update repository name");
@@ -48,6 +54,24 @@ internal static class Program
         True(!UpdatePackageManager.IsSafeZipEntry("../SocialDistance.dll"), "Zip Slip parent rejected");
         True(!UpdatePackageManager.IsSafeZipEntry("/SocialDistance.dll"), "Rooted ZIP entry rejected");
         True(!UpdatePackageManager.IsSafeZipEntry("C:\\SocialDistance.dll"), "Drive path rejected");
+
+        var installProbe = Path.Combine(Path.GetTempPath(), "SocialDistance.dll");
+        File.WriteAllText(installProbe, "probe");
+        var registeredDirectory = Path.Combine(Path.GetTempPath(), "SocialDistance 日本語 folder");
+        Directory.CreateDirectory(registeredDirectory);
+        var registeredProbe = Path.Combine(registeredDirectory, "SocialDistance.dll");
+        File.WriteAllText(registeredProbe, "registered");
+        string resolvedPath, resolveError;
+        True(PluginInstallLocation.TryResolve("file:///C:/Some%20Folder/SocialDistance.dll", installProbe,
+            out resolvedPath, out resolveError) == false, "Uninstalled registered path is not replaced by assembly fallback");
+        True(PluginInstallLocation.TryResolve("", installProbe, out resolvedPath, out resolveError),
+            "Assembly location is fallback when ACT registration path is missing");
+        Equal(Path.GetFullPath(installProbe), resolvedPath, "Install path normalized");
+        True(PluginInstallLocation.TryResolve(new Uri(registeredProbe).AbsoluteUri, installProbe,
+            out resolvedPath, out resolveError), "ACT registered path with Japanese characters and spaces resolves");
+        Equal(Path.GetFullPath(registeredProbe), resolvedPath, "ACT registration takes priority over Assembly.Location");
+        File.Delete(installProbe);
+        Directory.Delete(registeredDirectory, true);
 
         var temp = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
             "SocialDistanceTests-" + Guid.NewGuid().ToString("N"));
@@ -74,6 +98,23 @@ internal static class Program
             True(!UpdatePackageManager.VerifySha256(file, hash), "Corrupt asset rejected");
             Equal(hash, UpdatePackageManager.ParseChecksum(hash + "  SocialDistance-v2.5.0.zip",
                 "SocialDistance-v2.5.0.zip"), "SHA-256 manifest parsing");
+
+            var installDir = Path.Combine(temp, "install");
+            Directory.CreateDirectory(installDir);
+            var target = Path.Combine(installDir, "SocialDistance.dll");
+            var staged = Path.Combine(temp, "staged.dll");
+            File.WriteAllText(target, "previous plugin bytes");
+            File.WriteAllText(staged, "new plugin bytes");
+            var backup = SocialDistance.Updater.UpdateApplyEngine.ReplaceAtomically(staged, target, p => { });
+            Equal("new plugin bytes", File.ReadAllText(target), "Update replacement installs staged bytes");
+            Equal("previous plugin bytes", File.ReadAllText(backup), "Update replacement keeps backup");
+
+            File.WriteAllText(target, "previous plugin bytes");
+            File.WriteAllText(staged, "bad plugin bytes");
+            Throws(() => SocialDistance.Updater.UpdateApplyEngine.ReplaceAtomically(staged, target,
+                p => { throw new InvalidDataException("simulated post-replace verification failure"); }),
+                "Update verification failure triggers rollback");
+            Equal("previous plugin bytes", File.ReadAllText(target), "Rollback restores the previous plugin");
         }
         finally
         {
@@ -187,6 +228,100 @@ internal static class Program
         }
     }
 
+    private static void TestReleaseLatestApiBudget()
+    {
+        using (var sameVersionClient = new GitHubReleaseClient(new LatestReleaseHandler("v2.5.1", 200)))
+        {
+            var result = sameVersionClient.CheckAsync(new Version(2, 5, 1), CancellationToken.None).GetAwaiter().GetResult();
+            Equal(UpdateCheckKind.UpToDate, result.Kind, "Same latest version does not call GitHub REST API");
+        }
+        var sameHandler = LatestReleaseHandler.LastCreated;
+        Equal(0, sameHandler.ApiCalls, "Same-version REST API call count is zero");
+
+        using (var limitedClient = new GitHubReleaseClient(new LatestReleaseHandler("v2.5.2", 429)))
+        {
+            var result = limitedClient.CheckAsync(new Version(2, 5, 1), CancellationToken.None).GetAwaiter().GetResult();
+            Equal(UpdateCheckKind.RateLimitedAvailable, result.Kind, "API rate limit falls back to the tag-pinned Release");
+            Equal("v2.5.2", result.Release.TagName, "Rate-limit fallback pins the resolved stable tag");
+            Equal("SocialDistance-v2.5.2.zip", result.Release.Assets[0].Name, "Rate-limit fallback selects the versioned ZIP");
+            True(result.Release.Assets[0].DownloadUrl.EndsWith("/releases/download/v2.5.2/SocialDistance-v2.5.2.zip",
+                StringComparison.Ordinal), "Rate-limit fallback URL is pinned to the stable tag");
+            True(UpdatePackageManager.IsExpectedReleaseAssetUrl(result.Release, result.Release.Assets[0]),
+                "Configured repository and tag-pinned asset URL is accepted");
+            var foreignAsset = new ReleaseAssetInfo
+            {
+                Name = result.Release.Assets[0].Name,
+                DownloadUrl = result.Release.Assets[0].DownloadUrl.Replace("Roxyz0501", "other-owner")
+            };
+            True(!UpdatePackageManager.IsExpectedReleaseAssetUrl(result.Release, foreignAsset),
+                "Asset URL from another owner is rejected");
+            True(result.Release.Assets.Any(x => x.Name.EndsWith(".zip.sha256", StringComparison.Ordinal)),
+                "Rate-limit fallback requires a SHA-256 asset");
+        }
+        using (var forbiddenClient = new GitHubReleaseClient(new LatestReleaseHandler("v2.5.2", 403)))
+        {
+            var result = forbiddenClient.CheckAsync(new Version(2, 5, 1), CancellationToken.None).GetAwaiter().GetResult();
+            Equal(UpdateCheckKind.RateLimitedAvailable, result.Kind, "HTTP 403 API limit also uses pinned Release fallback");
+        }
+
+        using (var invalidClient = new GitHubReleaseClient(new LatestReleaseHandler("v2.5.2-rc.1", 403)))
+        {
+            var invalid = invalidClient.CheckAsync(new Version(2, 5, 1), CancellationToken.None).GetAwaiter().GetResult();
+            Equal(UpdateCheckKind.Failed, invalid.Kind, "Prerelease latest tag is rejected");
+            Equal(UpdateCheckFailureKind.InvalidResponse, invalid.FailureKind, "Invalid tag is distinct from network failure");
+        }
+
+        var helperArgs = UpdatePackageManager.BuildUpdaterArguments(
+            @"C:\ACT plugins\日本語\SocialDistance.dll",
+            @"C:\Users\user\AppData\Local\SocialDistance\Updates\2.5.2 x\SocialDistance.dll",
+            1234, 5678, "2.5.2", "ja");
+        True(helperArgs.Contains("\"C:\\ACT plugins\\日本語\\SocialDistance.dll\""),
+            "Updater arguments preserve spaces and Japanese install paths");
+
+        using (var networkClient = new GitHubReleaseClient(new NetworkFailureHandler()))
+        {
+            var result = networkClient.CheckAsync(new Version(2, 5, 1), CancellationToken.None).GetAwaiter().GetResult();
+            Equal(UpdateCheckKind.Failed, result.Kind, "Network failure does not crash update check");
+            Equal(UpdateCheckFailureKind.Network, result.FailureKind, "Network failure is distinct from API limit");
+        }
+    }
+
+    private sealed class LatestReleaseHandler : HttpMessageHandler
+    {
+        public static LatestReleaseHandler LastCreated;
+        private readonly string tag;
+        private readonly int apiStatus;
+        public int ApiCalls { get; private set; }
+
+        public LatestReleaseHandler(string tag, int apiStatus)
+        {
+            this.tag = tag;
+            this.apiStatus = apiStatus;
+            LastCreated = this;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri.Host == "api.github.com")
+            {
+                ApiCalls++;
+                return Task.FromResult(new HttpResponseMessage((HttpStatusCode)apiStatus));
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Redirect)
+            {
+                Headers = { Location = new Uri("https://github.com/Roxyz0501/socialdistance-act-plugin/releases/tag/" + tag) }
+            });
+        }
+    }
+
+    private sealed class NetworkFailureHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            throw new HttpRequestException("simulated network failure");
+        }
+    }
+
     private sealed class BlockingHttpHandler : HttpMessageHandler
     {
         public volatile bool WasCalled;
@@ -224,4 +359,3 @@ internal static class Program
         catch { True(true, name); }
     }
 }
-

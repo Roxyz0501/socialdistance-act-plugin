@@ -27,12 +27,14 @@ namespace SocialDistance
         public List<ReleaseAssetInfo> Assets { get; set; } = new List<ReleaseAssetInfo>();
     }
 
-    internal enum UpdateCheckKind { RepositoryMissing, UpToDate, Available, Failed }
+    internal enum UpdateCheckKind { RepositoryMissing, UpToDate, Available, RateLimitedAvailable, Failed }
+    internal enum UpdateCheckFailureKind { None, Network, RateLimit, InvalidResponse }
 
     internal sealed class UpdateCheckResult
     {
         public UpdateCheckKind Kind { get; set; }
         public string Error { get; set; }
+        public UpdateCheckFailureKind FailureKind { get; set; }
         public SemVersion CurrentVersion { get; set; }
         public ReleaseInfo Release { get; set; }
     }

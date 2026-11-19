@@ -10,8 +10,11 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 & dotnet build (Join-Path $root 'AetherRange\AetherRange.csproj') -c $Configuration "-p:ActPath=$ActPath" --configfile (Join-Path $root 'NuGet.Config')
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+& dotnet build (Join-Path $root 'SocialDistance.Updater\SocialDistance.Updater.csproj') -c $Configuration "-p:Version=$Version" "-p:AssemblyVersion=$Version.0" "-p:FileVersion=$Version.0" --configfile (Join-Path $root 'NuGet.Config')
+if ($LASTEXITCODE -ne 0) { throw 'Update helper build failed.' }
 
 $dll = Join-Path $root "AetherRange\bin\$Configuration\net48\SocialDistance.dll"
+$updater = Join-Path $root "SocialDistance.Updater\bin\$Configuration\net48\SocialDistance.Updater.exe"
 $actual = [Reflection.AssemblyName]::GetAssemblyName($dll).Version
 $actualSemVer = "$($actual.Major).$($actual.Minor).$($actual.Build)"
 if ($actualSemVer -ne $Version) { throw "DLL version $actualSemVer does not match requested release $Version." }
@@ -21,6 +24,7 @@ New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 $staging = Join-Path $releaseDir "SocialDistance-v$Version"
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 Copy-Item -LiteralPath $dll -Destination (Join-Path $staging 'SocialDistance.dll') -Force
+Copy-Item -LiteralPath $updater -Destination (Join-Path $staging 'SocialDistance.Updater.exe') -Force
 Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination (Join-Path $staging 'README.md') -Force
 Copy-Item -LiteralPath (Join-Path $root 'AetherRange\Assets\Jobs\XIVAPI-LICENSE.txt') -Destination (Join-Path $staging 'XIVAPI-LICENSE.txt') -Force
 

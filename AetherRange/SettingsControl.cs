@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
+using Roxyz.Act.UI;
 
 namespace SocialDistance
 {
@@ -9,7 +10,7 @@ namespace SocialDistance
     {
         private readonly Label headerTitle = Label("");
         private readonly Label headerSubtitle = Label("");
-        private readonly TabControl tabs = new TabControl();
+        private readonly PluginTabs tabs;
         private readonly TabPage displayTab = new TabPage();
         private readonly TabPage distanceTab = new TabPage();
         private readonly TabPage updateTab = new TabPage();
@@ -73,6 +74,9 @@ namespace SocialDistance
         private readonly Label currentVersionValue = Label("");
         private readonly Label latestVersionCaption = Label("");
         private readonly Label latestVersionValue = Label("");
+        private readonly Label authorCaption = Label("");
+        private readonly Label authorValue = Label("Roxyz0501");
+        private readonly LinkLabel repositoryLink = new LinkLabel { AutoSize = true, Text = "https://github.com/Roxyz0501/socialdistance-act-plugin" };
         private readonly Label updateStatus = Label("");
         private readonly Label releaseNotesCaption = Label("");
         private readonly TextBox releaseNotes = new TextBox();
@@ -82,7 +86,6 @@ namespace SocialDistance
 
         private bool loading = true;
         private string lastDistanceUnit;
-        private int hoveredTabIndex = -1;
 
         public SettingsControl(PluginSettings settings)
         {
@@ -132,10 +135,7 @@ namespace SocialDistance
             headerSubtitle.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             headerSubtitle.Location = new Point(20, 43);
 
-            tabs.Dock = DockStyle.Fill;
-            tabs.Font = new Font("Yu Gothic UI Semibold", 9f);
-            tabs.Padding = new Point(18, 6);
-            tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabs = new PluginTabs(supportTab);
             displayTab.BackColor = Color.White;
             distanceTab.BackColor = Color.White;
             updateTab.BackColor = Color.White;
@@ -258,7 +258,8 @@ namespace SocialDistance
         public void ShowUpdateResult(UpdateCheckResult result)
         {
             checkNowButton.Enabled = true;
-            installUpdateButton.Enabled = result != null && result.Kind == UpdateCheckKind.Available;
+            installUpdateButton.Enabled = result != null &&
+                (result.Kind == UpdateCheckKind.Available || result.Kind == UpdateCheckKind.RateLimitedAvailable);
             laterButton.Enabled = installUpdateButton.Enabled;
             currentVersionValue.Text = result?.CurrentVersion?.ToString() ??
                                        Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
@@ -287,12 +288,19 @@ namespace SocialDistance
                     updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateAvailable",
                         currentVersionValue.Text, latestVersionValue.Text);
                     break;
+                case UpdateCheckKind.RateLimitedAvailable:
+                    updateStatus.ForeColor = Color.FromArgb(176, 101, 32);
+                    updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateRateLimitedAvailable",
+                        currentVersionValue.Text, latestVersionValue.Text);
+                    break;
                 default:
                     updateStatus.ForeColor = Color.FromArgb(176, 65, 56);
-                    updateStatus.Text = Localization.Text(CurrentLanguage, "UpdateFailed",
-                        string.IsNullOrWhiteSpace(result.Error)
-                            ? Localization.Text(CurrentLanguage, "UnknownError")
-                            : result.Error);
+                    var failureKey = result.FailureKind == UpdateCheckFailureKind.RateLimit ? "UpdateRateLimited" :
+                        result.FailureKind == UpdateCheckFailureKind.Network ? "UpdateConnectionFailed" : "UpdateFailed";
+                    updateStatus.Text = failureKey == "UpdateFailed"
+                        ? Localization.Text(CurrentLanguage, failureKey,
+                            string.IsNullOrWhiteSpace(result.Error) ? Localization.Text(CurrentLanguage, "UnknownError") : result.Error)
+                        : Localization.Text(CurrentLanguage, failureKey);
                     break;
             }
         }
@@ -454,7 +462,7 @@ namespace SocialDistance
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 9,
+                RowCount = 11,
                 Padding = new Padding(24),
                 BackColor = Color.White
             };
@@ -463,6 +471,8 @@ namespace SocialDistance
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
@@ -496,17 +506,23 @@ namespace SocialDistance
             latestVersionValue.Text = "—";
             latestVersionValue.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
             layout.Controls.Add(latestVersionValue, 1, 4);
+            layout.Controls.Add(authorCaption, 0, 5);
+            authorValue.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            layout.Controls.Add(authorValue, 1, 5);
+            repositoryLink.LinkColor = Color.FromArgb(30, 91, 145);
+            repositoryLink.ActiveLinkColor = Color.FromArgb(202, 101, 20);
+            layout.Controls.Add(repositoryLink, 1, 6);
 
             updateStatus.AutoSize = false;
             updateStatus.Dock = DockStyle.Fill;
-            AddWide(layout, updateStatus, 5);
-            AddWide(layout, releaseNotesCaption, 6);
+            AddWide(layout, updateStatus, 7);
+            AddWide(layout, releaseNotesCaption, 8);
             releaseNotes.Multiline = true;
             releaseNotes.ReadOnly = true;
             releaseNotes.ScrollBars = ScrollBars.Vertical;
             releaseNotes.Dock = DockStyle.Fill;
             releaseNotes.BackColor = Color.FromArgb(250, 251, 252);
-            layout.Controls.Add(releaseNotes, 0, 7);
+            layout.Controls.Add(releaseNotes, 0, 9);
             layout.SetColumnSpan(releaseNotes, 2);
 
             var buttons = new FlowLayoutPanel
@@ -529,7 +545,7 @@ namespace SocialDistance
             laterButton.Enabled = false;
             buttons.Controls.Add(installUpdateButton);
             buttons.Controls.Add(laterButton);
-            layout.Controls.Add(buttons, 0, 8);
+            layout.Controls.Add(buttons, 0, 10);
             layout.SetColumnSpan(buttons, 2);
             return layout;
         }
@@ -641,14 +657,7 @@ namespace SocialDistance
             installUpdateButton.Click += delegate { UpdateInstallRequested?.Invoke(this, EventArgs.Empty); };
             laterButton.Click += delegate { UpdateLaterRequested?.Invoke(this, EventArgs.Empty); };
             supportButton.Click += OpenSupportLink;
-            tabs.DrawItem += DrawTab;
-            tabs.MouseMove += OnTabsMouseMove;
-            tabs.MouseLeave += delegate
-            {
-                if (hoveredTabIndex < 0) return;
-                hoveredTabIndex = -1;
-                tabs.Invalidate();
-            };
+            repositoryLink.LinkClicked += OpenRepositoryLink;
         }
 
         private void ApplyLanguage(string languageCode)
@@ -660,6 +669,9 @@ namespace SocialDistance
             distanceTab.Text = Localization.Text(languageCode, "TabDistance");
             updateTab.Text = Localization.Text(languageCode, "TabUpdate");
             supportTab.Text = Localization.Text(languageCode, "TabSupport");
+            tabs.SetLanguageFont(languageCode == Localization.Japanese ? "Yu Gothic UI" :
+                languageCode == Localization.SimplifiedChinese ? "Microsoft YaHei UI" :
+                languageCode == Localization.Korean ? "Malgun Gothic" : "Segoe UI");
             enabled.Text = Localization.Text(languageCode, "ShowOverlay");
             hideInactive.Text = Localization.Text(languageCode, "HideInactive");
             showNames.Text = Localization.Text(languageCode, "ShowNames");
@@ -699,6 +711,8 @@ namespace SocialDistance
             checkNowButton.Text = Localization.Text(languageCode, "CheckNow");
             currentVersionCaption.Text = Localization.Text(languageCode, "CurrentVersion");
             latestVersionCaption.Text = Localization.Text(languageCode, "LatestVersion");
+            authorCaption.Text = Localization.Text(languageCode, "Author");
+            repositoryLink.Text = Localization.Text(languageCode, "RepositoryLink");
             releaseNotesCaption.Text = Localization.Text(languageCode, "ReleaseNotes");
             installUpdateButton.Text = Localization.Text(languageCode, "UpdateButton");
             laterButton.Text = Localization.Text(languageCode, "LaterButton");
@@ -738,54 +752,15 @@ namespace SocialDistance
                     : error);
         }
 
-        private void OnTabsMouseMove(object sender, MouseEventArgs e)
+        private void OpenRepositoryLink(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            var index = -1;
-            for (var i = 0; i < tabs.TabCount; i++)
-            {
-                if (!tabs.GetTabRect(i).Contains(e.Location)) continue;
-                index = i;
-                break;
-            }
-            if (hoveredTabIndex == index) return;
-            hoveredTabIndex = index;
-            tabs.Invalidate();
-        }
-
-        private void DrawTab(object sender, DrawItemEventArgs e)
-        {
-            var isSelected = e.Index == tabs.SelectedIndex;
-            var isHovered = e.Index == hoveredTabIndex;
-            var isSupport = tabs.TabPages[e.Index] == supportTab;
-            var background = isSelected ? Color.White : Color.FromArgb(240, 242, 245);
-            var foreground = Color.FromArgb(42, 53, 69);
-
-            if (isSupport)
-            {
-                background = isSelected
-                    ? Color.FromArgb(255, 245, 226)
-                    : (isHovered ? Color.FromArgb(255, 238, 207) : Color.FromArgb(250, 231, 197));
-                foreground = isSelected
-                    ? Color.FromArgb(137, 62, 7)
-                    : (isHovered ? Color.FromArgb(157, 72, 8) : Color.FromArgb(174, 84, 13));
-            }
-            else if (isHovered && !isSelected)
-            {
-                background = Color.FromArgb(247, 248, 250);
-            }
-
-            using (var brush = new SolidBrush(background))
-                e.Graphics.FillRectangle(brush, e.Bounds);
-            TextRenderer.DrawText(e.Graphics, tabs.TabPages[e.Index].Text, tabs.Font, e.Bounds,
-                foreground, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                            TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
-
-            if (isSupport && isSelected)
-            {
-                using (var pen = new Pen(Color.FromArgb(213, 137, 32), 2f))
-                    e.Graphics.DrawLine(pen, e.Bounds.Left + 4, e.Bounds.Bottom - 2,
-                        e.Bounds.Right - 4, e.Bounds.Bottom - 2);
-            }
+            string error;
+            if (ExternalLinkLauncher.TryOpen("https://github.com/Roxyz0501/socialdistance-act-plugin", out error))
+                return;
+            updateStatus.ForeColor = Color.FromArgb(176, 65, 56);
+            updateStatus.Text = Localization.Text(CurrentLanguage, "UpdatePrepareFailed",
+                string.Equals(error, "Invalid web address.", StringComparison.Ordinal)
+                    ? Localization.Text(CurrentLanguage, "InvalidAddress") : error);
         }
 
         private void UpdateEchoExample()
@@ -902,4 +877,3 @@ namespace SocialDistance
         }
     }
 }
-

@@ -44,13 +44,16 @@ namespace SocialDistance
             ["SourceEcho"] = "echo", ["SourceGameMessage"] = "game message", ["SaveFailed"] = "SocialDistance: Could not save settings — {0}",
             ["UpdateTitle"] = "SocialDistance updates", ["UpdateDescription"] = "Check stable GitHub Releases and prepare a verified update.",
             ["CheckAtStartup"] = "Check for updates at startup", ["CheckNow"] = "Check now",
-            ["CurrentVersion"] = "Current version", ["LatestVersion"] = "Latest version", ["ReleaseNotes"] = "Release notes",
-            ["UpdateButton"] = "Download and prepare update", ["LaterButton"] = "Later",
+            ["CurrentVersion"] = "Current version", ["LatestVersion"] = "Latest version", ["Author"] = "Author", ["RepositoryLink"] = "GitHub project page", ["ReleaseNotes"] = "Release notes",
+            ["UpdateButton"] = "Update", ["LaterButton"] = "Later",
             ["RepositoryMissing"] = "Update repository is not configured. Set the verified GitHub owner and repository before publishing.",
             ["UpdateChecking"] = "Checking for updates...", ["UpdateUpToDate"] = "You are using the latest stable version.",
             ["UpdateAvailable"] = "A stable update is available: {0} → {1}", ["UpdateFailed"] = "Update check failed: {0}",
+            ["UpdateRateLimitedAvailable"] = "Update {1} is available (current {0}). GitHub's API is rate-limited; the tag-pinned official package and SHA-256 will be verified if you choose Update.",
+            ["UpdateRateLimited"] = "GitHub is temporarily rate-limiting update checks. No repeated retries will be made.",
+            ["UpdateConnectionFailed"] = "Could not connect to GitHub to check for updates. Try again later.",
             ["UpdateDownloading"] = "Downloading and verifying the update...",
-            ["UpdatePrepared"] = "Verified DLL staged at:\r\n{0}\r\nClose ACT, manually replace SocialDistance.dll with this file, then restart ACT.",
+            ["UpdatePrepared"] = "The update is verified and ready. Close ACT to let the helper replace the plugin automatically, then restart ACT.",
             ["UpdatePrepareFailed"] = "Could not prepare the update: {0}", ["UpdateSkipped"] = "Version {0} was postponed.",
             ["NoReleaseNotes"] = "No release notes were provided.", ["NotChecked"] = "Not checked yet",
             ["InvalidAddress"] = "Invalid web address.", ["UnknownError"] = "Unknown error"
@@ -87,11 +90,14 @@ namespace SocialDistance
             ["SourceEcho"] = "echo", ["SourceGameMessage"] = "ゲーム内メッセージ", ["SaveFailed"] = "SocialDistance: 設定を保存できませんでした — {0}",
             ["UpdateTitle"] = "SocialDistanceの更新", ["UpdateDescription"] = "GitHub Releasesの安定版を確認し、検証済み更新を準備します。",
             ["CheckAtStartup"] = "起動時に更新を確認する", ["CheckNow"] = "今すぐ確認", ["CurrentVersion"] = "現在のバージョン",
-            ["LatestVersion"] = "最新バージョン", ["ReleaseNotes"] = "更新内容", ["UpdateButton"] = "更新をダウンロードして準備",
+            ["LatestVersion"] = "最新バージョン", ["Author"] = "作者", ["RepositoryLink"] = "GitHubプロジェクトページ", ["ReleaseNotes"] = "更新内容", ["UpdateButton"] = "更新する",
             ["LaterButton"] = "後で", ["RepositoryMissing"] = "更新元リポジトリが未設定です。公開前に正しいGitHub所有者とリポジトリ名を設定してください。",
             ["UpdateChecking"] = "更新を確認しています…", ["UpdateUpToDate"] = "最新の安定版を使用しています。",
             ["UpdateAvailable"] = "安定版の更新があります: {0} → {1}", ["UpdateFailed"] = "更新確認に失敗しました: {0}",
-            ["UpdateDownloading"] = "更新をダウンロードして検証しています…", ["UpdatePrepared"] = "検証済みDLLを次の場所に準備しました:\r\n{0}\r\nACT終了後、既存のSocialDistance.dllをこのファイルで手動置換し、ACTを再起動してください。",
+            ["UpdateRateLimitedAvailable"] = "更新 {1} が利用可能です（現在 {0}）。GitHub APIが制限中のため、「更新する」を押した場合にタグ固定の公式配布物とSHA-256を検証します。",
+            ["UpdateRateLimited"] = "GitHubの更新確認が一時的に制限されています。連続再試行は行いません。",
+            ["UpdateConnectionFailed"] = "GitHubに接続できず更新を確認できませんでした。時間をおいて再確認してください。",
+            ["UpdateDownloading"] = "更新をダウンロードして検証しています…", ["UpdatePrepared"] = "更新を検証し、適用準備ができました。ACTを終了すると補助プログラムが自動で置換します。その後、ACTを再起動してください。",
             ["UpdatePrepareFailed"] = "更新を準備できませんでした: {0}", ["UpdateSkipped"] = "バージョン {0} を後回しにしました。",
             ["NoReleaseNotes"] = "更新内容はありません。", ["NotChecked"] = "未確認", ["InvalidAddress"] = "Webアドレスが無効です。", ["UnknownError"] = "不明なエラー"
         };
@@ -117,10 +123,12 @@ namespace SocialDistance
             ["Started"] = "SocialDistance：已启动", ["Stopped"] = "SocialDistance：已停止", ["OverlayChanged"] = "SocialDistance：已通过{1}将悬浮窗设为{0}",
             ["Enabled"] = "显示", ["Disabled"] = "隐藏", ["SourceEcho"] = "echo", ["SourceGameMessage"] = "游戏消息", ["SaveFailed"] = "SocialDistance：无法保存设置 — {0}",
             ["UpdateTitle"] = "SocialDistance更新", ["UpdateDescription"] = "检查GitHub Releases稳定版并准备经过验证的更新。", ["CheckAtStartup"] = "启动时检查更新",
-            ["CheckNow"] = "立即检查", ["CurrentVersion"] = "当前版本", ["LatestVersion"] = "最新版本", ["ReleaseNotes"] = "更新内容",
-            ["UpdateButton"] = "下载并准备更新", ["LaterButton"] = "稍后", ["RepositoryMissing"] = "尚未配置更新仓库。发布前请设置正确的GitHub所有者和仓库名。",
+            ["CheckNow"] = "立即检查", ["CurrentVersion"] = "当前版本", ["LatestVersion"] = "最新版本", ["Author"] = "作者", ["RepositoryLink"] = "GitHub 项目页面", ["ReleaseNotes"] = "更新内容",
+            ["UpdateButton"] = "更新", ["LaterButton"] = "稍后", ["RepositoryMissing"] = "尚未配置更新仓库。发布前请设置正确的GitHub所有者和仓库名。",
             ["UpdateChecking"] = "正在检查更新…", ["UpdateUpToDate"] = "当前已是最新稳定版。", ["UpdateAvailable"] = "发现稳定版更新：{0} → {1}",
-            ["UpdateFailed"] = "检查更新失败：{0}", ["UpdateDownloading"] = "正在下载并验证更新…", ["UpdatePrepared"] = "已将验证通过的 DLL 暂存于：\r\n{0}\r\n关闭 ACT 后，请手动用此文件替换现有的 SocialDistance.dll，然后重新启动 ACT。",
+            ["UpdateFailed"] = "检查更新失败：{0}", ["UpdateDownloading"] = "正在下载并验证更新…", ["UpdatePrepared"] = "更新已验证并准备就绪。关闭 ACT 后，辅助程序会自动替换插件，然后请重新启动 ACT。",
+            ["UpdateRateLimitedAvailable"] = "有可用更新 {1}（当前 {0}）。GitHub API 请求受限；点击“更新”后将验证固定标签的官方安装包和 SHA-256。",
+            ["UpdateRateLimited"] = "GitHub 暂时限制了更新检查。不会连续重试。", ["UpdateConnectionFailed"] = "无法连接 GitHub 检查更新，请稍后重试。",
             ["UpdatePrepareFailed"] = "无法准备更新：{0}", ["UpdateSkipped"] = "已暂缓版本 {0}。", ["NoReleaseNotes"] = "未提供更新内容。", ["NotChecked"] = "尚未检查",
             ["InvalidAddress"] = "网页地址无效。", ["UnknownError"] = "未知错误"
         };
@@ -146,10 +154,12 @@ namespace SocialDistance
             ["Started"] = "SocialDistance: 시작됨", ["Stopped"] = "SocialDistance: 중지됨", ["OverlayChanged"] = "SocialDistance: {1}(으)로 오버레이를 {0} 상태로 변경했습니다",
             ["Enabled"] = "표시", ["Disabled"] = "숨김", ["SourceEcho"] = "echo", ["SourceGameMessage"] = "게임 메시지", ["SaveFailed"] = "SocialDistance: 설정을 저장하지 못했습니다 — {0}",
             ["UpdateTitle"] = "SocialDistance 업데이트", ["UpdateDescription"] = "GitHub Releases의 안정 버전을 확인하고 검증된 업데이트를 준비합니다.", ["CheckAtStartup"] = "시작할 때 업데이트 확인",
-            ["CheckNow"] = "지금 확인", ["CurrentVersion"] = "현재 버전", ["LatestVersion"] = "최신 버전", ["ReleaseNotes"] = "업데이트 내용",
-            ["UpdateButton"] = "업데이트 다운로드 및 준비", ["LaterButton"] = "나중에", ["RepositoryMissing"] = "업데이트 저장소가 설정되지 않았습니다. 배포 전에 올바른 GitHub 소유자와 저장소를 설정하세요.",
+            ["CheckNow"] = "지금 확인", ["CurrentVersion"] = "현재 버전", ["LatestVersion"] = "최신 버전", ["Author"] = "작성자", ["RepositoryLink"] = "GitHub 프로젝트 페이지", ["ReleaseNotes"] = "업데이트 내용",
+            ["UpdateButton"] = "업데이트", ["LaterButton"] = "나중에", ["RepositoryMissing"] = "업데이트 저장소가 설정되지 않았습니다. 배포 전에 올바른 GitHub 소유자와 저장소를 설정하세요.",
             ["UpdateChecking"] = "업데이트 확인 중…", ["UpdateUpToDate"] = "최신 안정 버전을 사용 중입니다.", ["UpdateAvailable"] = "안정 버전 업데이트가 있습니다: {0} → {1}",
-            ["UpdateFailed"] = "업데이트 확인 실패: {0}", ["UpdateDownloading"] = "업데이트 다운로드 및 검증 중…", ["UpdatePrepared"] = "검증된 DLL을 다음 위치에 준비했습니다:\r\n{0}\r\nACT를 종료한 뒤 기존 SocialDistance.dll을 이 파일로 직접 교체하고 ACT를 다시 시작하세요.",
+            ["UpdateFailed"] = "업데이트 확인 실패: {0}", ["UpdateDownloading"] = "업데이트 다운로드 및 검증 중…", ["UpdatePrepared"] = "업데이트를 검증하고 적용 준비를 마쳤습니다. ACT를 종료하면 보조 프로그램이 플러그인을 자동 교체합니다. 이후 ACT를 다시 시작하세요.",
+            ["UpdateRateLimitedAvailable"] = "업데이트 {1}을(를) 사용할 수 있습니다(현재 {0}). GitHub API가 제한 중이며, ‘업데이트’를 누르면 태그가 고정된 공식 패키지와 SHA-256을 검증합니다.",
+            ["UpdateRateLimited"] = "GitHub 업데이트 확인이 일시적으로 제한되었습니다. 연속 재시도는 하지 않습니다.", ["UpdateConnectionFailed"] = "GitHub에 연결할 수 없어 업데이트를 확인하지 못했습니다. 나중에 다시 시도하세요.",
             ["UpdatePrepareFailed"] = "업데이트 준비 실패: {0}", ["UpdateSkipped"] = "버전 {0}을(를) 나중으로 미뤘습니다.", ["NoReleaseNotes"] = "업데이트 내용이 없습니다.", ["NotChecked"] = "확인하지 않음",
             ["InvalidAddress"] = "웹 주소가 올바르지 않습니다.", ["UnknownError"] = "알 수 없는 오류"
         };
@@ -196,4 +206,3 @@ namespace SocialDistance
         }
     }
 }
-

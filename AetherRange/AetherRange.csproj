@@ -15,6 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\shared\PluginTabs.cs" Link="PluginTabs.cs" />
     <Reference Include="Advanced Combat Tracker">
       <HintPath>$(ActPath)</HintPath>
       <Private>false</Private>

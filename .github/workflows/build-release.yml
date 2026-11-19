@@ -35,6 +35,9 @@ jobs:
       - name: Build plugin
         shell: pwsh
         run: dotnet build .\AetherRange\AetherRange.csproj -c Release -p:ActPath="$env:ACT_PATH" --configfile .\NuGet.Config
+      - name: Build update helper
+        shell: pwsh
+        run: dotnet build .\SocialDistance.Updater\SocialDistance.Updater.csproj -c Release --configfile .\NuGet.Config
       - name: Build and run tests
         shell: pwsh
         run: |
@@ -44,7 +47,9 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: SocialDistance-build
-          path: AetherRange/bin/Release/net48/SocialDistance.dll
+          path: |
+            AetherRange/bin/Release/net48/SocialDistance.dll
+            SocialDistance.Updater/bin/Release/net48/SocialDistance.Updater.exe
           if-no-files-found: error
 
   release:

@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Linq;
 
 namespace SocialDistance
 {
@@ -465,7 +466,7 @@ namespace SocialDistance
                 updateCheckRunning = false;
                 lastUpdateResult = result;
                 settings.LastUpdateCheckUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
-                if (result.Kind == UpdateCheckKind.Available && !manual &&
+                if ((result.Kind == UpdateCheckKind.Available || result.Kind == UpdateCheckKind.RateLimitedAvailable) && !manual &&
                     string.Equals(settings.SkippedUpdateVersion, result.Release.Version.ToString(),
                         StringComparison.OrdinalIgnoreCase))
                 {
@@ -475,10 +476,11 @@ namespace SocialDistance
                 else
                 {
                     settingsControl.ShowUpdateResult(result);
-                    if (result.Kind == UpdateCheckKind.Available)
+                    if (result.Kind == UpdateCheckKind.Available || result.Kind == UpdateCheckKind.RateLimitedAvailable)
                     {
                         settingsControl.FocusUpdateTab();
-                        SetStatus(Localization.Text(settings.Language, "UpdateAvailable",
+                        SetStatus(Localization.Text(settings.Language,
+                            result.Kind == UpdateCheckKind.RateLimitedAvailable ? "UpdateRateLimitedAvailable" : "UpdateAvailable",
                             result.CurrentVersion, result.Release.Version));
                     }
                 }
@@ -487,7 +489,8 @@ namespace SocialDistance
 
         private void OnUpdateInstallRequested(object sender, EventArgs e)
         {
-            if (!acceptingWork || updateCheckRunning || updateInstallRunning || lastUpdateResult == null || lastUpdateResult.Kind != UpdateCheckKind.Available ||
+            if (!acceptingWork || updateCheckRunning || updateInstallRunning || lastUpdateResult == null ||
+                (lastUpdateResult.Kind != UpdateCheckKind.Available && lastUpdateResult.Kind != UpdateCheckKind.RateLimitedAvailable) ||
                 lastUpdateResult.Release == null || updatePackageManager == null)
                 return;
             settingsControl.ShowUpdatePreparing();
@@ -501,7 +504,17 @@ namespace SocialDistance
             UpdatePreparationResult result;
             try
             {
-                result = await updatePackageManager.PrepareAsync(release, cancellationToken).ConfigureAwait(false);
+                string targetPluginPath;
+                string pathError;
+                if (!TryGetRegisteredPluginPath(out targetPluginPath, out pathError))
+                    result = new UpdatePreparationResult { Success = false, Error = pathError };
+                else
+                {
+                    var actProcess = Process.GetCurrentProcess();
+                    result = await updatePackageManager.PrepareAsync(release, targetPluginPath,
+                        actProcess.Id, actProcess.StartTime.ToUniversalTime().Ticks,
+                        settings.Language, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -523,6 +536,42 @@ namespace SocialDistance
                             ? Localization.Text(settings.Language, "UnknownError")
                             : result.Error));
             });
+        }
+
+        private bool TryGetRegisteredPluginPath(out string path, out string error)
+        {
+            path = null;
+            error = null;
+            string registeredPath = null;
+            try
+            {
+                var registrations = ActGlobals.oFormActMain == null ? null : ActGlobals.oFormActMain.ActPlugins;
+                if (registrations != null)
+                {
+                    foreach (var registration in registrations)
+                    {
+                        if (registration == null || !ReferenceEquals(registration.pluginObj, this)) continue;
+                        var type = registration.GetType();
+                        var member = type.GetProperty("pluginFile", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var value = member == null ? null : member.GetValue(registration, null);
+                        if (value == null)
+                        {
+                            var field = type.GetField("pluginFile", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            if (field != null) value = field.GetValue(registration);
+                        }
+                        registeredPath = value as string ?? Convert.ToString(value, CultureInfo.InvariantCulture);
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetBaseException().Message;
+                return false;
+            }
+
+            return PluginInstallLocation.TryResolve(registeredPath,
+                Assembly.GetExecutingAssembly().Location, out path, out error);
         }
 
         private void OnUpdateLaterRequested(object sender, EventArgs e)
@@ -563,4 +612,3 @@ namespace SocialDistance
         }
     }
 }
-
